@@ -1,0 +1,46 @@
+[package]
+name = "libinjectionrs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.libinjectionrs]
+path = "../libinjectionrs"
+
+[build-dependencies]
+bindgen = "0.69"
+cc = "1.0"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_sqli"
+path = "fuzz_targets/fuzz_sqli.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_xss"
+path = "fuzz_targets/fuzz_xss.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_differential_sqli"
+path = "fuzz_targets/fuzz_differential_sqli.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_differential_xss"
+path = "fuzz_targets/fuzz_differential_xss.rs"
+test = false
+doc = false

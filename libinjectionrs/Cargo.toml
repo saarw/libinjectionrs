@@ -1,0 +1,25 @@
+[package]
+name = "libinjectionrs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust port of libinjection - SQL/XSS injection detection library"
+keywords = ["security", "sql-injection", "xss", "detection", "web-security"]
+categories = ["web-programming", "parser-implementations"]
+
+[dependencies]
+bitflags = { workspace = true }
+smallvec = { workspace = true, optional = true }
+
+[dev-dependencies]
+
+[features]
+default = ["std", "smallvec"]
+std = []
+smallvec = ["dep:smallvec"]
+
+[lib]
+name = "libinjectionrs"
+path = "src/lib.rs"

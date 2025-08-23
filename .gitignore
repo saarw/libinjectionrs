@@ -1,0 +1,90 @@
+# Rust build artifacts
+/target/
+/*/target/
+Cargo.lock
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+
+# Python artifacts (for test scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+.venv/
+
+# C/C++ build artifacts (excluding submodules)
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# FFI harness build artifacts
+/ffi-harness/obj/
+/ffi-harness/lib/
+
+# Fuzzing artifacts
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/corpus/*/
+!/fuzz/corpus/.gitkeep
+!/fuzz/artifacts/.gitkeep
+
+# Benchmark results
+/benches/target/
+/benches/*.json
+/benches/*.csv
+/benches/criterion/
+
+# Debug tokenizer artifacts
+/debug_tokenizer/target/
+
+# Comparison binary artifacts
+/comparison-bin/target/
+
+# Test results and coverage
+*.gcda
+*.gcno
+*.gcov
+gmon.out
+
+# Backup files
+*.bak
+*.backup
+
+# Local configuration
+.env
+.env.local
+
+# Performance test results
+*.prof
+*.profile
+
+# Documentation build artifacts
+/doc/
+/docs/target/
+
+# Note: libinjection-c/ is a git submodule and has its own .gitignore files

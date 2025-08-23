@@ -1,0 +1,14 @@
+# Build artifacts
+/target/
+Cargo.lock
+
+# Comparison test results
+comparison_results/
+*.csv
+*.json
+*.txt
+results/
+
+# Binary outputs
+/bin/
+comparison_*

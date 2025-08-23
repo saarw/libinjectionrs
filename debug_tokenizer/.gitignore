@@ -1,0 +1,8 @@
+# Debug build artifacts
+/target/
+Cargo.lock
+
+# Debug output files
+debug_output/
+*.debug
+*.trace

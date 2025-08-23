@@ -1,0 +1,31 @@
+[package]
+name = "libinjectionrs-benches"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "libinjectionrs_benches"
+path = "src/lib.rs"
+
+[[bench]]
+name = "sqli_bench"
+harness = false
+path = "sqli_bench.rs"
+
+[[bench]]
+name = "xss_bench" 
+harness = false
+path = "xss_bench.rs"
+
+[[bench]]
+name = "differential_bench"
+harness = false
+path = "differential_bench.rs"
+
+[dependencies]
+libinjectionrs = { path = "../libinjectionrs" }
+criterion.workspace = true
+
+[build-dependencies]
+bindgen = "0.69"
+cc = "1.0"

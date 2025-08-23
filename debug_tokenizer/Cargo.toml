@@ -1,0 +1,9 @@
+[package]
+name = "debug_tokenizer"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+libinjectionrs = { path = "../libinjectionrs" }

@@ -1,0 +1,20 @@
+[package]
+name = "libinjection-comparison"
+version = "0.1.0"
+edition = "2021"
+authors = ["Claude Code"]
+
+[[bin]]
+name = "compare"
+path = "src/main.rs"
+
+[dependencies]
+libinjectionrs = { path = "../libinjectionrs" }
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+
+[build-dependencies]
+bindgen = "0.69"
+cc = "1.0"

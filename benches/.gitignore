@@ -1,0 +1,15 @@
+# Benchmark build artifacts
+/target/
+Cargo.lock
+
+# Benchmark results
+*.json
+*.csv
+*.txt
+benchmark_results/
+criterion/
+
+# Performance profiles
+*.prof
+*.profile
+perf.data*

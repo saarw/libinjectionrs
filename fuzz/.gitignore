@@ -1,0 +1,23 @@
+# Fuzzing artifacts
+/target/
+/artifacts/
+/corpus/*/
+Cargo.lock
+
+# Keep corpus structure but ignore generated test cases
+!/corpus/
+/corpus/*
+!/corpus/.gitkeep
+
+# Keep artifacts structure but ignore crash files
+!/artifacts/
+/artifacts/*
+!/artifacts/.gitkeep
+
+# Fuzzing logs and temporary files
+*.log
+*.tmp
+*.prof
+
+# Build artifacts
+/build/

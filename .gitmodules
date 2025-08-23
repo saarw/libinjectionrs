@@ -1,0 +1,3 @@
+[submodule "libinjection-c"]
+	path = libinjection-c
+	url = https://github.com/libinjection/libinjection

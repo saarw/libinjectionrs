@@ -1,0 +1,17 @@
+# C build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+/obj/
+/lib/
+
+# Generated files
+*.d
+*.dep
+.deps/
+
+# Temporary files
+*.tmp
+*.temp
