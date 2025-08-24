@@ -110,6 +110,7 @@ impl SqliDetector {
 
 const LIBINJECTION_SQLI_MAX_TOKENS: usize = 5;
 const LIBINJECTION_SQLI_TOKEN_SIZE: usize = 32;
+const CHAR_NULL: u8 = b'\0';
 
 struct SqliState<'a> {
     input: &'a [u8],
@@ -157,26 +158,70 @@ impl<'a> SqliState<'a> {
             return SqliResult::Safe;
         }
         
-        let contexts = if self.flags == SqliFlags::NONE {
-            vec![
-                SqliFlags::QUOTE_NONE | SqliFlags::SQL_ANSI,
-                SqliFlags::QUOTE_SINGLE | SqliFlags::SQL_ANSI,
-                SqliFlags::QUOTE_DOUBLE | SqliFlags::SQL_MYSQL,
-            ]
-        } else {
-            vec![self.flags]
-        };
-        
-        for context in contexts {
-            self.reset(context);
+        // If flags are specified, just use them
+        if self.flags != SqliFlags::NONE {
             let fp = self.fingerprint();
+            if self.is_sqli(&fp) {
+                return SqliResult::Injection { fingerprint: fp };
+            }
+            return SqliResult::Safe;
+        }
+        
+        // Follow the exact C libinjection_is_sqli logic:
+        
+        // Test input "as-is" with ANSI context
+        self.reset(SqliFlags::QUOTE_NONE | SqliFlags::SQL_ANSI);
+        let fp = self.fingerprint();
+        if self.is_sqli(&fp) {
+            return SqliResult::Injection { fingerprint: fp };
+        }
+        
+        // Check if we need to reparse as MySQL based on comment stats from ANSI parse
+        let should_reparse = self.reparse_as_mysql();
+        if should_reparse {
+            // Reparse the same input with MySQL context (this resets all state)
+            self.reset(SqliFlags::QUOTE_NONE | SqliFlags::SQL_MYSQL);
+            let fp = self.fingerprint();
+            if self.is_sqli(&fp) {
+                return SqliResult::Injection { fingerprint: fp };
+            }
+        }
+        
+        // If input has a single quote, test as if input started with '
+        if self.input.contains(&b'\'') {
+            self.reset(SqliFlags::QUOTE_SINGLE | SqliFlags::SQL_ANSI);
+            let fp = self.fingerprint();
+            if self.is_sqli(&fp) {
+                return SqliResult::Injection { fingerprint: fp };
+            }
             
+            // Check if we need to reparse as MySQL based on comment stats from ANSI parse
+            let should_reparse = self.reparse_as_mysql();
+            if should_reparse {
+                self.reset(SqliFlags::QUOTE_SINGLE | SqliFlags::SQL_MYSQL);
+                let fp = self.fingerprint();
+                if self.is_sqli(&fp) {
+                    return SqliResult::Injection { fingerprint: fp };
+                }
+            }
+        }
+        
+        // If input has a double quote, test with double quote context (MySQL only)
+        if self.input.contains(&b'"') {
+            self.reset(SqliFlags::QUOTE_DOUBLE | SqliFlags::SQL_MYSQL);
+            let fp = self.fingerprint();
             if self.is_sqli(&fp) {
                 return SqliResult::Injection { fingerprint: fp };
             }
         }
         
         SqliResult::Safe
+    }
+    
+    /// Determines if input should be reparsed as MySQL based on comment statistics
+    /// Matches the C implementation's reparse_as_mysql() function
+    fn reparse_as_mysql(&self) -> bool {
+        self.stats_comment_ddx != 0 || self.stats_comment_hash != 0
     }
     
     fn reset(&mut self, flags: SqliFlags) {
@@ -388,6 +433,13 @@ impl<'a> SqliState<'a> {
         
         // Truncate tokens to actual length
         self.tokens.truncate(left);
+        
+        // Copy tokenizer statistics to match C implementation behavior
+        self.stats_comment_c = tokenizer.stats_comment_c;
+        self.stats_comment_ddw = tokenizer.stats_comment_ddw;
+        self.stats_comment_ddx = tokenizer.stats_comment_ddx;
+        self.stats_comment_hash = tokenizer.stats_comment_hash;
+        
         left
     }
     
@@ -740,7 +792,176 @@ impl<'a> SqliState<'a> {
     }
     
     fn is_sqli(&self, fingerprint: &Fingerprint) -> bool {
-        blacklist::is_blacklisted(fingerprint.as_str())
+        if blacklist::is_blacklisted(fingerprint.as_str()) {
+            self.is_not_whitelist()
+        } else {
+            false
+        }
+    }
+    
+    /// Whitelist functionality to reduce false positives
+    /// Returns true if SQLi, false if benign
+    fn is_not_whitelist(&self) -> bool {
+        let fingerprint_str = core::str::from_utf8(&self.fingerprint)
+            .unwrap_or("")
+            .trim_end_matches('\0');
+        let tlen = fingerprint_str.len();
+        
+        // Check for sp_password in comments
+        if tlen > 1 && self.fingerprint[tlen - 1] == b'c' {
+            if self.contains_sp_password() {
+                return true;
+            }
+        }
+        
+        match tlen {
+            2 => self.handle_two_token_whitelist(),
+            3 => self.handle_three_token_whitelist(),
+            4 | 5 => true, // Nothing special for 4-5 tokens right now
+            _ => true,
+        }
+    }
+    
+    fn contains_sp_password(&self) -> bool {
+        let input_str = core::str::from_utf8(self.input).unwrap_or("");
+        input_str.to_ascii_lowercase().contains("sp_password")
+    }
+    
+    fn handle_two_token_whitelist(&self) -> bool {
+        let fingerprint_str = core::str::from_utf8(&self.fingerprint)
+            .unwrap_or("")
+            .trim_end_matches('\0');
+            
+        if self.tokens.len() < 2 {
+            return true;
+        }
+        
+        // Case 2: "very small SQLi" which make them hard to tell from normal input
+        
+        // Check for Union pattern - fingerprint[1] == 'U'
+        if fingerprint_str.chars().nth(1) == Some('U') {
+            if self.stats_tokens == 2 {
+                // "1U" with exactly 2 tokens - likely not SQLi
+                return false;
+            } else {
+                // "1U" with folding or more tokens - likely SQLi
+                return true;
+            }
+        }
+        
+        // If comment is '#' ignore - too many false positives
+        if self.tokens[1].token_type == TokenType::Comment &&
+           self.tokens[1].val[0] == b'#' {
+            return false;
+        }
+        
+        // For fingerprint like 'nc', only comments of /* are treated as SQL
+        // ending comments of "--" and "#" are not SQLi
+        if self.tokens[0].token_type == TokenType::Bareword &&
+           self.tokens[1].token_type == TokenType::Comment &&
+           self.tokens[1].val[0] != b'/' {
+            return false;
+        }
+        
+        // If '1c' ends with '/*' then it's SQLi
+        if self.tokens[0].token_type == TokenType::Number &&
+           self.tokens[1].token_type == TokenType::Comment &&
+           self.tokens[1].val[0] == b'/' {
+            return true;
+        }
+        
+        // Handle number followed by comment
+        if self.tokens[0].token_type == TokenType::Number &&
+           self.tokens[1].token_type == TokenType::Comment {
+            
+            if self.stats_tokens > 2 {
+                // We have some folding going on, highly likely SQLi
+                return true;
+            }
+            
+            // Check that next character after the number is whitespace, '/' or '-'
+            let token0_end = self.tokens[0].pos + self.tokens[0].len;
+            if token0_end < self.input.len() {
+                let ch = self.input[token0_end];
+                
+                if ch <= 32 {
+                    // Next char was whitespace, e.g. "1234 --"
+                    return true;
+                }
+                
+                if ch == b'/' && token0_end + 1 < self.input.len() &&
+                   self.input[token0_end + 1] == b'*' {
+                    return true;
+                }
+                
+                if ch == b'-' && token0_end + 1 < self.input.len() &&
+                   self.input[token0_end + 1] == b'-' {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        // Detect obvious SQLi scans - only if comment is longer than "--"
+        // and starts with '-'
+        if self.tokens[1].token_type == TokenType::Comment &&
+           self.tokens[1].len > 2 && self.tokens[1].val[0] == b'-' {
+            return false;
+        }
+        
+        true
+    }
+    
+    fn handle_three_token_whitelist(&self) -> bool {
+        let fingerprint_str = core::str::from_utf8(&self.fingerprint)
+            .unwrap_or("")
+            .trim_end_matches('\0');
+            
+        if self.tokens.len() < 3 {
+            return true;
+        }
+        
+        // String concatenation patterns: ...foo' + 'bar...
+        if fingerprint_str == "sos" || fingerprint_str == "s&s" {
+            if self.tokens[0].str_open == CHAR_NULL &&
+               self.tokens[2].str_close == CHAR_NULL &&
+               self.tokens[0].str_close == self.tokens[2].str_open {
+                // Pattern like ....foo" + "bar....
+                return true;
+            }
+            
+            if self.stats_tokens == 3 {
+                return false;
+            }
+            
+            // Not SQLi
+            return false;
+        }
+        
+        // Handle 'sexy and 17' vs 'sexy and 17<18' patterns
+        if fingerprint_str == "s&n" || fingerprint_str == "n&1" ||
+           fingerprint_str == "1&1" || fingerprint_str == "1&v" ||
+           fingerprint_str == "1&s" {
+            if self.stats_tokens == 3 {
+                // 'sexy and 17' - not SQLi
+                return false;
+            }
+            // 'sexy and 17<18' - SQLi
+            return true;
+        }
+        
+        // Handle keyword patterns
+        if self.tokens[1].token_type == TokenType::Keyword {
+            let keyword_val = self.tokens[1].value_as_str().to_ascii_uppercase();
+            if self.tokens[1].len < 5 || !keyword_val.starts_with("INTO") {
+                // If it's not "INTO OUTFILE" or "INTO DUMPFILE" (MySQL)
+                // then treat as safe
+                return false;
+            }
+        }
+        
+        true
     }
 }
 

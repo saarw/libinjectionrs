@@ -446,6 +446,9 @@ impl<'a> SqliTokenizer<'a> {
     fn parse_hash(&mut self) -> usize {
         self.stats_comment_hash += 1;
         if self.flags.contains(SqliFlags::SQL_MYSQL) {
+            // C version has a bug that increments stats_comment_hash twice in MySQL mode
+            // We need to match this behavior exactly
+            self.stats_comment_hash += 1;
             self.parse_eol_comment()
         } else {
             self.current.assign_char(TYPE_OPERATOR, self.pos, b'#');
