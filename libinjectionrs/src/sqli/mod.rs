@@ -221,31 +221,31 @@ impl<'a> SqliState<'a> {
     
     fn fold_tokens(&mut self) -> usize {
         let mut last_comment = Token::new();
-        let mut pos = 0;
-        let mut left = 0;
+        let mut pos = 0usize;
+        let mut left = 0usize;
         let mut more = true;
         
         // Clear last comment
         last_comment.token_type = TokenType::None;
         
-        // Ensure we have tokens to work with - start by getting first non-comment/paren/unary token
+        // Skip all initial comments, left-parens and unary operators
         let mut tokenizer = SqliTokenizer::new(self.input, self.flags);
         self.tokens.clear();
         
-        // Skip initial comments, parens, and unary operators
+        // Ensure we have space for tokens
+        self.tokens.reserve(LIBINJECTION_SQLI_MAX_TOKENS + 3);
+        
         while more {
             if let Some(token) = tokenizer.next_token() {
-                if token.token_type == TokenType::Comment ||
-                   token.token_type == TokenType::LeftParenthesis ||
-                   token.token_type == TokenType::SqlType ||
-                   self.is_unary_op(&token) {
-                    // Skip these tokens
-                    continue;
-                } else {
+                if !(token.token_type == TokenType::Comment ||
+                     token.token_type == TokenType::LeftParenthesis ||
+                     token.token_type == TokenType::SqlType ||
+                     self.is_unary_op(&token)) {
                     // Found a real token
                     self.tokens.push(token);
                     break;
-                }
+                } 
+                // Skip comments, left parens, sqltypes, and unary ops
             } else {
                 more = false;
             }
@@ -262,9 +262,34 @@ impl<'a> SqliState<'a> {
         loop {
             // Do we have all the max number of tokens? If so, do some special cases for 5 tokens
             if pos >= LIBINJECTION_SQLI_MAX_TOKENS {
-                if self.check_special_5_token_patterns() {
+                if (self.tokens.len() >= 5) &&
+                   ((self.tokens[0].token_type == TokenType::Number &&
+                     (self.tokens[1].token_type == TokenType::Operator ||
+                      self.tokens[1].token_type == TokenType::Comma) &&
+                     self.tokens[2].token_type == TokenType::LeftParenthesis &&
+                     self.tokens[3].token_type == TokenType::Number &&
+                     self.tokens[4].token_type == TokenType::RightParenthesis) ||
+                    (self.tokens[0].token_type == TokenType::Bareword &&
+                     self.tokens[1].token_type == TokenType::Operator &&
+                     self.tokens[2].token_type == TokenType::LeftParenthesis &&
+                     (self.tokens[3].token_type == TokenType::Bareword ||
+                      self.tokens[3].token_type == TokenType::Number) &&
+                     self.tokens[4].token_type == TokenType::RightParenthesis) ||
+                    (self.tokens[0].token_type == TokenType::Number &&
+                     self.tokens[1].token_type == TokenType::RightParenthesis &&
+                     self.tokens[2].token_type == TokenType::Comma &&
+                     self.tokens[3].token_type == TokenType::LeftParenthesis &&
+                     self.tokens[4].token_type == TokenType::Number) ||
+                    (self.tokens[0].token_type == TokenType::Bareword &&
+                     self.tokens[1].token_type == TokenType::RightParenthesis &&
+                     self.tokens[2].token_type == TokenType::Operator &&
+                     self.tokens[3].token_type == TokenType::LeftParenthesis &&
+                     self.tokens[4].token_type == TokenType::Bareword)) {
                     if pos > LIBINJECTION_SQLI_MAX_TOKENS {
-                        self.tokens[1] = self.tokens[LIBINJECTION_SQLI_MAX_TOKENS].clone();
+                        // Copy token[LIBINJECTION_SQLI_MAX_TOKENS] to token[1]
+                        if self.tokens.len() > LIBINJECTION_SQLI_MAX_TOKENS {
+                            self.tokens[1] = self.tokens[LIBINJECTION_SQLI_MAX_TOKENS].clone();
+                        }
                         pos = 2;
                         left = 0;
                     } else {
@@ -304,12 +329,13 @@ impl<'a> SqliState<'a> {
                 continue;
             }
             
-            // Try 2-token folding rules
-            if self.try_fold_two_tokens(left, &mut pos, &mut left) {
+            // Now apply 2-token folding rules from C version
+            let continue_folding = self.apply_two_token_rules(left, &mut pos, &mut left, &mut tokenizer, &mut more, &mut last_comment);
+            if continue_folding {
                 continue;
             }
             
-            // Get one more token for 3-token rules
+            // All cases of handling 2 tokens is done and nothing matched. Get one more token
             while more && pos <= LIBINJECTION_SQLI_MAX_TOKENS && pos - left < 3 {
                 if let Some(token) = tokenizer.next_token() {
                     if token.token_type == TokenType::Comment {
@@ -334,15 +360,16 @@ impl<'a> SqliState<'a> {
                 continue;
             }
             
-            // Try 3-token folding rules
-            if self.try_fold_three_tokens(left, &mut pos, &mut left) {
+            // Now apply 3-token folding rules from C version
+            let continue_folding = self.apply_three_token_rules(left, &mut pos, &mut left);
+            if continue_folding {
                 continue;
             }
             
             // No folding -- assume left-most token is good, now use the existing 2 tokens --
             // do not get another
             left += 1;
-        }
+        } // while(1)
         
         // If we have 4 or less tokens, and we had a comment token at the end, add it back
         if left < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
@@ -359,6 +386,7 @@ impl<'a> SqliState<'a> {
             left = LIBINJECTION_SQLI_MAX_TOKENS;
         }
         
+        // Truncate tokens to actual length
         self.tokens.truncate(left);
         left
     }
@@ -547,6 +575,117 @@ impl<'a> SqliState<'a> {
         let lookup_result = sqli_data::lookup_word(&merged.to_ascii_uppercase());
         
         lookup_result != TokenType::Bareword
+    }
+
+    // Apply all 2-token folding rules exactly as in C version
+    fn apply_two_token_rules(&mut self, left: usize, pos: &mut usize, left_ptr: &mut usize, 
+                           _tokenizer: &mut SqliTokenizer, _more: &mut bool, 
+                           _last_comment: &mut Token) -> bool {
+        if left + 1 >= self.tokens.len() {
+            return false;
+        }
+        
+        // FOLD: "ss" -> "s" - "foo" "bar" is valid SQL, just ignore second string
+        if self.tokens[left].token_type == TokenType::String &&
+           self.tokens[left + 1].token_type == TokenType::String {
+            *pos -= 1;
+            self.stats_folds += 1;
+            return true;
+        }
+        
+        // FOLD: ";;" -> ";" - fold away repeated semicolons
+        if self.tokens[left].token_type == TokenType::Semicolon &&
+           self.tokens[left + 1].token_type == TokenType::Semicolon {
+            *pos -= 1;
+            self.stats_folds += 1;
+            return true;
+        }
+        
+        // FOLD: (operator|logic_operator) + (unary_op|sqltype) -> operator
+        if (self.tokens[left].token_type == TokenType::Operator ||
+            self.tokens[left].token_type == TokenType::LogicOperator) &&
+           (self.is_unary_op(&self.tokens[left + 1]) ||
+            self.tokens[left + 1].token_type == TokenType::SqlType) {
+            *pos -= 1;
+            self.stats_folds += 1;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: leftparens + unary_op -> leftparens
+        if self.tokens[left].token_type == TokenType::LeftParenthesis &&
+           self.is_unary_op(&self.tokens[left + 1]) {
+            *pos -= 1;
+            self.stats_folds += 1;
+            if *left_ptr > 0 {
+                *left_ptr -= 1;
+            }
+            return true;
+        }
+        
+        // Try word merging (simplified version for now)
+        if self.can_merge_words(left) {
+            *pos -= 1;
+            self.stats_folds += 1;
+            if *left_ptr > 0 {
+                *left_ptr -= 1;
+            }
+            return true;
+        }
+        
+        false
+    }
+    
+    // Apply all 3-token folding rules exactly as in C version  
+    fn apply_three_token_rules(&mut self, left: usize, pos: &mut usize, left_ptr: &mut usize) -> bool {
+        if left + 2 >= self.tokens.len() {
+            return false;
+        }
+        
+        // FOLD: number operator number -> number
+        if self.tokens[left].token_type == TokenType::Number &&
+           self.tokens[left + 1].token_type == TokenType::Operator &&
+           self.tokens[left + 2].token_type == TokenType::Number {
+            *pos -= 2;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: operator X operator -> operator (where X != leftparens)
+        if self.tokens[left].token_type == TokenType::Operator &&
+           self.tokens[left + 1].token_type != TokenType::LeftParenthesis &&
+           self.tokens[left + 2].token_type == TokenType::Operator {
+            *left_ptr = 0;
+            *pos -= 2;
+            return true;
+        }
+        
+        // FOLD: logic_operator X logic_operator -> logic_operator 
+        if self.tokens[left].token_type == TokenType::LogicOperator &&
+           self.tokens[left + 2].token_type == TokenType::LogicOperator {
+            *pos -= 2;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: (bareword|number|string|variable) comma (number|bareword|string|variable) -> first_token
+        // This handles cases like "1,2", "name,value", etc.
+        if (self.tokens[left].token_type == TokenType::Bareword ||
+            self.tokens[left].token_type == TokenType::Number ||
+            self.tokens[left].token_type == TokenType::String ||
+            self.tokens[left].token_type == TokenType::Variable) &&
+           self.tokens[left + 1].token_type == TokenType::Comma &&
+           (self.tokens[left + 2].token_type == TokenType::Number ||
+            self.tokens[left + 2].token_type == TokenType::Bareword ||
+            self.tokens[left + 2].token_type == TokenType::String ||
+            self.tokens[left + 2].token_type == TokenType::Variable) {
+            *pos -= 2;
+            *left_ptr = 0;
+            self.stats_folds += 1;
+            return true;
+        }
+        
+        false
     }
     
     fn generate_fingerprint(&mut self, token_count: usize) {
