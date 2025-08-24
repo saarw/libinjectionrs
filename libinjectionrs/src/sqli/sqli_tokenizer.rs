@@ -128,35 +128,52 @@ pub fn parse_white(sf: &mut SqliState) -> usize {
 }
 
 pub fn parse_operator1(sf: &mut SqliState) -> usize {
-    let ch = sf.input[sf.pos];
-    sf.current = Token::new_char(TYPE_OPERATOR, sf.pos, ch);
+    let ch = sf.s[sf.pos];
+    unsafe {
+        (*sf.current).assign_char('o', sf.pos, ch as char);
+    }
     sf.pos + 1
 }
 
 pub fn parse_other(sf: &mut SqliState) -> usize {
-    let ch = sf.input[sf.pos];
-    sf.current = Token::new_char(TYPE_UNKNOWN, sf.pos, ch);
+    let ch = sf.s[sf.pos];
+    unsafe {
+        (*sf.current).assign_char('?', sf.pos, ch as char);
+    }
     sf.pos + 1
 }
 
 pub fn parse_char(sf: &mut SqliState) -> usize {
-    let ch = sf.input[sf.pos];
-    sf.current = Token::new_char(ch, sf.pos, ch);
+    let ch = sf.s[sf.pos];
+    let token_type = match ch {
+        b'(' => '(',
+        b')' => ')',
+        b',' => ',',
+        b';' => ';',
+        _ => '?',
+    };
+    unsafe {
+        (*sf.current).assign_char(token_type, sf.pos, ch as char);
+    }
     sf.pos + 1
 }
 
 pub fn parse_eol_comment(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let remaining = &sf.input[pos..];
+    let remaining = &sf.s[pos..];
     
     match remaining.iter().position(|&c| c == b'\n') {
         Some(newline_pos) => {
-            sf.current = Token::new(TYPE_COMMENT, pos, &sf.input[pos..pos + newline_pos]);
+            unsafe {
+                (*sf.current).assign('c', pos, newline_pos, &sf.s[pos..pos + newline_pos]);
+            }
             pos + newline_pos + 1
         }
         None => {
-            sf.current = Token::new(TYPE_COMMENT, pos, remaining);
-            sf.input.len()
+            unsafe {
+                (*sf.current).assign('c', pos, remaining.len(), remaining);
+            }
+            sf.slen
         }
     }
 }
@@ -164,30 +181,35 @@ pub fn parse_eol_comment(sf: &mut SqliState) -> usize {
 pub fn parse_hash(sf: &mut SqliState) -> usize {
     sf.stats_comment_hash += 1;
     if sf.flags.contains(crate::sqli::SqliFlags::MYSQL) {
-        sf.stats_comment_hash += 1;
         parse_eol_comment(sf)
     } else {
-        sf.current = Token::new_char(TYPE_OPERATOR, sf.pos, b'#');
+        unsafe {
+            (*sf.current).assign_char('o', sf.pos, '#');
+        }
         sf.pos + 1
     }
 }
 
 pub fn parse_dash(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let slen = input.len();
     
     // Check for SQL comment patterns
     if pos + 2 < slen && input[pos + 1] == b'-' && char_is_white(input[pos + 2]) {
+        sf.stats_comment_ddw += 1;
         parse_eol_comment(sf)
     } else if pos + 2 == slen && input[pos + 1] == b'-' {
+        sf.stats_comment_ddw += 1;
         parse_eol_comment(sf)
     } else if pos + 1 < slen && input[pos + 1] == b'-' && 
               sf.flags.contains(crate::sqli::SqliFlags::ANSI) {
         sf.stats_comment_ddx += 1;
         parse_eol_comment(sf)
     } else {
-        sf.current = Token::new_char(TYPE_OPERATOR, pos, b'-');
+        unsafe {
+            (*sf.current).assign_char('o', pos, '-');
+        }
         pos + 1
     }
 }
@@ -207,7 +229,7 @@ fn is_mysql_comment(input: &[u8], pos: usize) -> bool {
 
 pub fn parse_slash(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let slen = input.len();
     
     if pos + 1 == slen || input[pos + 1] != b'*' {
@@ -225,42 +247,48 @@ pub fn parse_slash(sf: &mut SqliState) -> usize {
         None => slen - pos,
     };
     
-    let mut ctype = TYPE_COMMENT;
+    let mut ctype = 'c';
     
     // Check for nested comments or MySQL conditional comments
     if let Some(offset) = end_pos {
         let inner = &input[pos + 2..search_start + offset];
         if memchr2(inner, b'/', b'*').is_some() {
-            ctype = TYPE_EVIL;
+            ctype = 'X';
         }
     }
     
     if is_mysql_comment(input, pos) {
-        ctype = TYPE_EVIL;
+        ctype = 'X';
     }
     
-    sf.current = Token::new(ctype, pos, &input[pos..pos + clen]);
+    unsafe {
+        (*sf.current).assign(ctype, pos, clen, &input[pos..pos + clen]);
+    }
     pos + clen
 }
 
 pub fn parse_backslash(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let slen = input.len();
     
     // MySQL alias for NULL: \N
     if pos + 1 < slen && input[pos + 1] == b'N' {
-        sf.current = Token::new(TYPE_NUMBER, pos, &input[pos..pos + 2]);
+        unsafe {
+            (*sf.current).assign('1', pos, 2, &input[pos..pos + 2]);
+        }
         pos + 2
     } else {
-        sf.current = Token::new_char(TYPE_BACKSLASH, pos, input[pos]);
+        unsafe {
+            (*sf.current).assign_char('\\', pos, input[pos] as char);
+        }
         pos + 1
     }
 }
 
 pub fn parse_operator2(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let slen = input.len();
     
     if pos + 1 >= slen {
@@ -270,7 +298,9 @@ pub fn parse_operator2(sf: &mut SqliState) -> usize {
     // Check for three-character operators
     if pos + 2 < slen && input[pos] == b'<' && input[pos + 1] == b'=' && 
        input[pos + 2] == b'>' {
-        sf.current = Token::new(TYPE_OPERATOR, pos, &input[pos..pos + 3]);
+        unsafe {
+            (*sf.current).assign('o', pos, 3, &input[pos..pos + 3]);
+        }
         return pos + 3;
     }
     
@@ -282,11 +312,13 @@ pub fn parse_operator2(sf: &mut SqliState) -> usize {
         b"<>" | b"<@" | b">=" | b">>" | b"??" | b"@>" | b"^=" | 
         b"|/" | b"|=" | b"||" | b"~*" => {
             let token_type = if two_char == b"&&" || two_char == b"||" {
-                TYPE_LOGIC_OPERATOR
+                '&'
             } else {
-                TYPE_OPERATOR
+                'o'
             };
-            sf.current = Token::new(token_type, pos, two_char);
+            unsafe {
+                (*sf.current).assign(token_type, pos, 2, two_char);
+            }
             pos + 2
         }
         _ => parse_operator1(sf)
@@ -295,7 +327,7 @@ pub fn parse_operator2(sf: &mut SqliState) -> usize {
 
 pub fn parse_money(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     
     // PostgreSQL money type: $123.45
     let mut i = pos + 1;
@@ -304,7 +336,9 @@ pub fn parse_money(sf: &mut SqliState) -> usize {
     }
     
     if i > pos + 1 {
-        sf.current = Token::new(TYPE_NUMBER, pos, &input[pos..i]);
+        unsafe {
+            (*sf.current).assign('1', pos, i - pos, &input[pos..i]);
+        }
         i
     } else {
         parse_other(sf)
@@ -313,7 +347,7 @@ pub fn parse_money(sf: &mut SqliState) -> usize {
 
 pub fn parse_var(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     
     // SQL variables: @var, @@var
     let mut i = pos + 1;
@@ -334,17 +368,21 @@ pub fn parse_var(sf: &mut SqliState) -> usize {
     }
     
     if i > pos + 1 {
-        sf.current = Token::new(TYPE_VARIABLE, pos, &input[pos..i]);
+        unsafe {
+            (*sf.current).assign('v', pos, i - pos, &input[pos..i]);
+        }
         i
     } else {
-        sf.current = Token::new_char(TYPE_OPERATOR, pos, input[pos]);
+        unsafe {
+            (*sf.current).assign_char('o', pos, input[pos] as char);
+        }
         pos + 1
     }
 }
 
 pub fn parse_number(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let mut i = pos;
     
     // Parse integer part
@@ -371,7 +409,9 @@ pub fn parse_number(sf: &mut SqliState) -> usize {
         }
     }
     
-    sf.current = Token::new(TYPE_NUMBER, pos, &input[pos..i]);
+    unsafe {
+        (*sf.current).assign('1', pos, i - pos, &input[pos..i]);
+    }
     i
 }
 
@@ -380,7 +420,7 @@ pub fn parse_number(sf: &mut SqliState) -> usize {
 
 pub fn parse_string(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let slen = input.len();
     let quote = input[pos];
     let mut i = pos + 1;
@@ -411,10 +451,12 @@ pub fn parse_string(sf: &mut SqliState) -> usize {
         }
     }
     
-    sf.current = Token::new(TYPE_STRING, pos, &input[pos..i]);
-    sf.current.str_open = Some(quote);
-    if i > pos + 1 && i <= slen {
-        sf.current.str_close = Some(quote);
+    unsafe {
+        (*sf.current).assign('s', pos, i - pos, &input[pos..i]);
+        (*sf.current).str_open = quote as char;
+        if i > pos + 1 && i <= slen {
+            (*sf.current).str_close = quote as char;
+        }
     }
     
     i
@@ -422,72 +464,289 @@ pub fn parse_string(sf: &mut SqliState) -> usize {
 
 pub fn parse_word(sf: &mut SqliState) -> usize {
     let pos = sf.pos;
-    let input = sf.input;
+    let input = sf.s;
     let wlen = strlencspn(&input[pos..], b" []{}><:?=@!#~+-*/&|^%(),';\t\n\x0b\x0c\r\"\x00\xa0");
     
     if wlen == 0 {
         return parse_char(sf);
     }
     
-    // Enhanced keyword detection matching C implementation
+    // Enhanced keyword detection matching C implementation exactly
     let token_type = if let Ok(word) = std::str::from_utf8(&input[pos..pos + wlen]) {
         let upper_word = word.to_uppercase();
         match upper_word.as_str() {
-            "UNION" => TYPE_UNION,
-            "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "CREATE" | "DROP" | "ALTER" |
-            "FROM" | "WHERE" | "INTO" | "VALUES" | "SET" | "TABLE" | "DATABASE" |
-            "INDEX" | "VIEW" | "TRIGGER" | "PROCEDURE" | "FUNCTION" => TYPE_KEYWORD,
-            "AND" | "OR" | "NOT" | "XOR" => TYPE_LOGIC_OPERATOR,
+            // UNION type
+            "UNION" => 'U',
+            // EXPRESSION type (matches C libinjection_sqli_data.h)
+            "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "CASE" | "CREATE" | 
+            "SET" | "RAISEERROR" | "EXECUTE" => 'E',
+            // GROUP type
+            "HAVING" | "LIMIT" => 'B',
+            // Regular keywords
+            "FROM" | "WHERE" | "INTO" | "VALUES" | "TABLE" | "DATABASE" | 
+            "INDEX" | "VIEW" | "TRIGGER" | "PROCEDURE" | "DROP" | "ALTER" |
+            "AS" | "JOIN" | "LEFT" | "RIGHT" | "INNER" | "OUTER" | "FULL" |
+            "BY" | "WITH" | "WITHOUT" | "ON" | "USING" | "ORDER" | "GROUP" => 'k',
+            // Logic operators
+            "AND" | "OR" | "NOT" | "XOR" => '&',
+            // SQL types
             "INT" | "INTEGER" | "VARCHAR" | "CHAR" | "TEXT" | "BLOB" | "DECIMAL" |
-            "FLOAT" | "DOUBLE" | "DATE" | "TIME" | "TIMESTAMP" => TYPE_SQLTYPE,
+            "FLOAT" | "DOUBLE" | "DATE" | "TIME" | "TIMESTAMP" | "BOOL" | "BOOLEAN" => 't',
+            // Functions
             "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "SUBSTRING" | "CONCAT" |
-            "LENGTH" | "UPPER" | "LOWER" | "TRIM" => TYPE_FUNCTION,
-            _ => TYPE_BAREWORD,
+            "LENGTH" | "UPPER" | "LOWER" | "TRIM" | "CAST" | "CONVERT" => 'f',
+            // Default to bareword
+            _ => 'n',
         }
     } else {
-        TYPE_BAREWORD
+        'n'
     };
     
-    sf.current = Token::new(token_type, pos, &input[pos..pos + wlen]);
+    unsafe {
+        (*sf.current).assign(token_type, pos, wlen, &input[pos..pos + wlen]);
+    }
     pos + wlen
 }
 
 pub fn parse_tick(sf: &mut SqliState) -> usize {
-    // TODO: Implement backtick parsing
-    parse_char(sf)
+    let pos = parse_string_core(sf, '`', 1);
+    
+    unsafe {
+        let current = &mut *sf.current;
+        // Check if the value is a function name (simplified lookup)
+        if let Ok(val_str) = std::str::from_utf8(&current.val[..current.len.min(31)]) {
+            let upper_val = val_str.to_uppercase();
+            if matches!(upper_val.as_str(), 
+                "COUNT" | "SUM" | "AVG" | "MIN" | "MAX" | "SUBSTRING" | "CONCAT" |
+                "LENGTH" | "UPPER" | "LOWER" | "TRIM" | "DATABASE" | "USER") {
+                current.token_type = 'f';
+            } else {
+                current.token_type = 'n';
+            }
+        } else {
+            current.token_type = 'n';
+        }
+    }
+    
+    pos
+}
+
+/// Core string parsing function matching C's parse_string_core exactly
+pub fn parse_string_core(sf: &mut SqliState, delim: char, offset: usize) -> usize {
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    // Look for closing delimiter starting from pos + offset
+    let mut qpos = None;
+    for i in (pos + offset)..slen {
+        if s[i] == delim as u8 {
+            qpos = Some(i);
+            break;
+        }
+    }
+    
+    unsafe {
+        let current = &mut *sf.current;
+        
+        // Set string open/close markers
+        if offset > 0 {
+            current.str_open = delim;
+        } else {
+            current.str_open = '\0';
+        }
+        
+        let mut end_pos = pos + offset;
+        let mut closed_str = false;
+        
+        match qpos {
+            None => {
+                // String ended without closing quote
+                current.assign('s', pos + offset, slen - pos - offset, &s[pos + offset..]);
+                current.str_close = '\0';
+                end_pos = slen;
+            }
+            Some(qpos_val) => {
+                // Found closing quote, but check for escaped or doubled quotes
+                let str_len = qpos_val - (pos + offset);
+                current.assign('s', pos + offset, str_len, &s[pos + offset..qpos_val]);
+                current.str_close = delim;
+                closed_str = true;
+                end_pos = qpos_val + 1;
+                
+                // Handle quote doubling (SQL standard escape)
+                if end_pos < slen && s[end_pos] == delim as u8 {
+                    // This is a doubled quote, continue parsing
+                    let remaining = parse_string_core_continue(sf, end_pos, delim);
+                    return remaining;
+                }
+            }
+        }
+        
+        end_pos
+    }
+}
+
+fn parse_string_core_continue(sf: &mut SqliState, start_pos: usize, delim: char) -> usize {
+    let mut pos = start_pos + 1; // Skip the second quote
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    // Continue looking for the actual end
+    while pos < slen {
+        if s[pos] == delim as u8 {
+            if pos + 1 < slen && s[pos + 1] == delim as u8 {
+                // Another doubled quote, skip both
+                pos += 2;
+                continue;
+            } else {
+                // Found the real end
+                return pos + 1;
+            }
+        }
+        pos += 1;
+    }
+    
+    slen
 }
 
 pub fn parse_ustring(sf: &mut SqliState) -> usize {
-    // TODO: Implement Unicode string parsing
-    parse_word(sf)
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    // Check for U&'...' pattern (Unicode string with escape)
+    if pos + 2 < slen && s[pos + 1] == b'&' && s[pos + 2] == b'\'' {
+        sf.pos += 2;
+        let end_pos = parse_string(sf);
+        unsafe {
+            let current = &mut *sf.current;
+            current.str_open = 'u';
+            if current.str_close == '\'' {
+                current.str_close = 'u';
+            }
+        }
+        end_pos
+    } else {
+        parse_word(sf)
+    }
 }
 
 pub fn parse_qstring(sf: &mut SqliState) -> usize {
-    // TODO: Implement Q-string parsing
-    parse_word(sf)
+    parse_qstring_core(sf, 1)
 }
 
 pub fn parse_nqstring(sf: &mut SqliState) -> usize {
-    // TODO: Implement N-string parsing  
+    parse_qstring_core(sf, 2)
+}
+
+/// Oracle Q-string parsing: Q'[...]' or Q'{...}' etc.
+fn parse_qstring_core(sf: &mut SqliState, offset: usize) -> usize {
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    if pos + offset + 2 >= slen {
+        return parse_word(sf);
+    }
+    
+    // Check for Q' pattern  
+    if s[pos + offset] != b'\'' {
+        return parse_word(sf);
+    }
+    
+    let delimiter_pos = pos + offset + 1;
+    let delim_start = s[delimiter_pos];
+    
+    // Map opening delimiter to closing delimiter
+    let delim_end = match delim_start {
+        b'(' => b')',
+        b'[' => b']',
+        b'{' => b'}',
+        b'<' => b'>',
+        other => other, // For other characters, use same char to close
+    };
+    
+    // Look for pattern: delim_end followed by '
+    let search_start = delimiter_pos + 1;
+    for i in search_start..slen.saturating_sub(1) {
+        if s[i] == delim_end && s[i + 1] == b'\'' {
+            // Found the end pattern
+            unsafe {
+                let current = &mut *sf.current;
+                let content_start = delimiter_pos + 1;
+                let content_len = i - content_start;
+                current.assign('s', content_start, content_len, &s[content_start..i]);
+                current.str_open = delim_start as char;
+                current.str_close = delim_end as char;
+            }
+            return i + 2; // Skip past the closing quote
+        }
+    }
+    
+    // No proper closing found, treat as word
     parse_word(sf)
 }
 
 pub fn parse_xstring(sf: &mut SqliState) -> usize {
-    // TODO: Implement hex string parsing
-    parse_word(sf)
+    // PostgreSQL/MySQL hex strings: X'deadbeef' or 0xdeadbeef
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    if pos + 2 >= slen || s[pos + 1] != b'\'' {
+        return parse_word(sf);
+    }
+    
+    parse_string_core(sf, '\'', 2)
 }
 
 pub fn parse_bstring(sf: &mut SqliState) -> usize {
-    // TODO: Implement binary string parsing
-    parse_word(sf)
+    // PostgreSQL binary strings: B'10101010'
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    if pos + 2 >= slen || s[pos + 1] != b'\'' {
+        return parse_word(sf);
+    }
+    
+    parse_string_core(sf, '\'', 2)
 }
 
 pub fn parse_estring(sf: &mut SqliState) -> usize {
-    // TODO: Implement escape string parsing
-    parse_word(sf)
+    // PostgreSQL escape strings: E'...' or N'...' (National charset)
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    if pos + 2 >= slen || s[pos + 1] != b'\'' {
+        return parse_word(sf);
+    }
+    
+    parse_string_core(sf, '\'', 2)
 }
 
 pub fn parse_bword(sf: &mut SqliState) -> usize {
-    // TODO: Implement bracket word parsing
+    // SQL Server bracket words: [table_name] or [column name]
+    let pos = sf.pos;
+    let slen = sf.slen;
+    let s = sf.s;
+    
+    // Look for closing bracket
+    for i in (pos + 1)..slen {
+        if s[i] == b']' {
+            unsafe {
+                let current = &mut *sf.current;
+                let content_len = i - pos - 1;
+                current.assign('n', pos + 1, content_len, &s[pos + 1..i]);
+                current.str_open = '[';
+                current.str_close = ']';
+            }
+            return i + 1;
+        }
+    }
+    
+    // No closing bracket found, treat as single char
     parse_char(sf)
 }
