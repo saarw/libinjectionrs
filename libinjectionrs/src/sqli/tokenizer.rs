@@ -261,8 +261,12 @@ impl<'a> SqliTokenizer<'a> {
         
         self.current.clear();
         
-        // Handle quote context at start of string (commented out for now - not in C impl)
-        // TODO: Add support for QUOTE_SINGLE and QUOTE_DOUBLE flags if needed
+        // Handle quote context at start of string
+        let quote_context = self.flags.quote_context();
+        if self.pos == 0 && quote_context != b'\0' {
+            // We're starting with a quote context, so the entire input should be treated as a string
+            return self.handle_quote_context(quote_context);
+        }
         
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
@@ -275,6 +279,52 @@ impl<'a> SqliTokenizer<'a> {
         }
         
         None
+    }
+    
+    fn handle_quote_context(&mut self, quote_char: u8) -> Option<Token> {
+        // When in quote context, parse the input as if it started with the quote character
+        // Look for the closing quote of the same type
+        let mut end_pos = self.pos;
+        let mut in_string = true;
+        
+        while end_pos < self.input.len() && in_string {
+            if self.input[end_pos] == quote_char {
+                // Found potential closing quote
+                if self.is_double_delim_escaped(end_pos) {
+                    // Escaped quote (e.g. '' in SQL), skip both
+                    end_pos += 2;
+                    continue;
+                } else if end_pos > 0 && self.is_backslash_escaped(end_pos - 1) {
+                    // Backslash escaped
+                    end_pos += 1;
+                    continue;
+                } else {
+                    // Found unescaped closing quote
+                    in_string = false;
+                    break;
+                }
+            } else {
+                end_pos += 1;
+            }
+        }
+        
+        if in_string {
+            // No closing quote found, treat entire rest of input as string
+            let content = &self.input[self.pos..];
+            self.current.assign(TYPE_STRING, self.pos, self.input.len() - self.pos, content);
+            self.current.str_open = quote_char;
+            self.current.str_close = CHAR_NULL;
+            self.pos = self.input.len();
+        } else {
+            // Found closing quote
+            let content = &self.input[self.pos..end_pos];
+            self.current.assign(TYPE_STRING, self.pos, end_pos - self.pos, content);
+            self.current.str_open = quote_char;
+            self.current.str_close = quote_char;
+            self.pos = end_pos + 1; // Skip the closing quote
+        }
+        
+        Some(self.current.clone())
     }
     
     // Character dispatch function - matches char_parse_map in C

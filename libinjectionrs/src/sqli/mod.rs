@@ -7,8 +7,11 @@ pub struct SqliFlags(u32);
 
 impl SqliFlags {
     pub const FLAG_NONE: SqliFlags = SqliFlags(0);
-    pub const FLAG_SQL_ANSI: SqliFlags = SqliFlags(1 << 1);
-    pub const FLAG_SQL_MYSQL: SqliFlags = SqliFlags(1 << 2);
+    pub const FLAG_QUOTE_NONE: SqliFlags = SqliFlags(1 << 0);
+    pub const FLAG_QUOTE_SINGLE: SqliFlags = SqliFlags(1 << 1);
+    pub const FLAG_QUOTE_DOUBLE: SqliFlags = SqliFlags(1 << 2);
+    pub const FLAG_SQL_ANSI: SqliFlags = SqliFlags(1 << 3);
+    pub const FLAG_SQL_MYSQL: SqliFlags = SqliFlags(1 << 4);
 }
 
 impl SqliFlags {
@@ -22,6 +25,16 @@ impl SqliFlags {
 
     pub fn is_mysql(&self) -> bool {
         self.0 & Self::FLAG_SQL_MYSQL.0 != 0
+    }
+    
+    pub fn quote_context(&self) -> u8 {
+        if self.0 & Self::FLAG_QUOTE_SINGLE.0 != 0 {
+            b'\''
+        } else if self.0 & Self::FLAG_QUOTE_DOUBLE.0 != 0 {
+            b'"'
+        } else {
+            b'\0'
+        }
     }
 }
 
@@ -160,27 +173,55 @@ impl<'a> SqliState<'a> {
     /// Detects SQL injection with additional flag handling
     /// This matches the C implementation's libinjection_is_sqli() function
     pub fn detect(&mut self) -> bool {
-        // Parse and get fingerprint
-        let fingerprint = self.fingerprint();
-        
-        // Check if it's blacklisted
-        if !self.check_is_sqli(&fingerprint) {
+        // no input? not SQLi
+        if self.input.is_empty() {
             return false;
         }
         
-        // For ANSI mode with certain comment patterns, re-parse as MySQL
-        if self.flags.is_ansi() && self.reparse_as_mysql() {
-            // Reset and re-parse as MySQL
-            self.reset(SqliFlags::FLAG_SQL_MYSQL);
+        // Test input "as-is"
+        self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+        let fingerprint = self.fingerprint();
+        if self.check_is_sqli(&fingerprint) {
+            return true;
+        } else if self.reparse_as_mysql() {
+            self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
             let fingerprint = self.fingerprint();
-            
-            // Check again with MySQL parsing
-            if !self.check_is_sqli(&fingerprint) {
-                return false;
+            if self.check_is_sqli(&fingerprint) {
+                return true;
             }
         }
         
-        true
+        // If input has a single quote, test as if input was actually preceded by '
+        if self.input.contains(&b'\'') {
+            self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_SINGLE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+            let fingerprint = self.fingerprint();
+            if self.check_is_sqli(&fingerprint) {
+                return true;
+            } else if self.reparse_as_mysql() {
+                self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_SINGLE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
+                let fingerprint = self.fingerprint();
+                if self.check_is_sqli(&fingerprint) {
+                    return true;
+                }
+            }
+        }
+        
+        // If input has a double quote, test as if input was actually preceded by "
+        if self.input.contains(&b'"') {
+            self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+            let fingerprint = self.fingerprint();
+            if self.check_is_sqli(&fingerprint) {
+                return true;
+            } else if self.reparse_as_mysql() {
+                self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
+                let fingerprint = self.fingerprint();
+                if self.check_is_sqli(&fingerprint) {
+                    return true;
+                }
+            }
+        }
+        
+        false
     }
     
     /// Get the detected fingerprint as a string
@@ -234,29 +275,11 @@ impl<'a> SqliState<'a> {
     }
     
     fn fingerprint(&mut self) -> Fingerprint {
-        self.tokenize();
         let token_count = self.fold_tokens();
         self.generate_fingerprint(token_count);
         Fingerprint::new(self.fingerprint)
     }
     
-    fn tokenize(&mut self) {
-        let mut tokenizer = SqliTokenizer::new(self.input, self.flags);
-        
-        while let Some(token) = tokenizer.next_token() {
-            self.tokens.push(token);
-            self.stats_tokens += 1;
-            
-            if self.tokens.len() >= LIBINJECTION_SQLI_MAX_TOKENS + 3 {
-                break;
-            }
-        }
-        
-        self.stats_comment_c = tokenizer.stats_comment_c;
-        self.stats_comment_ddw = tokenizer.stats_comment_ddw;
-        self.stats_comment_ddx = tokenizer.stats_comment_ddx;
-        self.stats_comment_hash = tokenizer.stats_comment_hash;
-    }
     
     fn fold_tokens(&mut self) -> usize {
         // This is a complete rewrite to match the C implementation exactly
