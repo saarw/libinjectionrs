@@ -12,6 +12,9 @@ use std::error::Error as StdError;
 pub mod sqli;
 pub mod xss;
 
+#[cfg(test)]
+mod tests;
+
 pub use sqli::{SqliState, SqliFlags, Fingerprint};
 pub use xss::{XssDetector, XssResult};
 

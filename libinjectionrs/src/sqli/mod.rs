@@ -103,7 +103,7 @@ pub struct SqliState<'a> {
     flags: SqliFlags,
     
     // Token storage - we store up to MAX_TOKENS + 3 during processing
-    tokens: Vec<Token>,
+    pub tokens: Vec<Token>,
     token_vec: Vec<Token>,
     
     // Current position in input
@@ -281,7 +281,7 @@ impl<'a> SqliState<'a> {
     }
     
     
-    fn fold_tokens(&mut self) -> usize {
+    pub fn fold_tokens(&mut self) -> usize {
         // This is a complete rewrite to match the C implementation exactly
         let mut last_comment = Token::new();
         let mut tokenizer = SqliTokenizer::new(self.input, self.flags);

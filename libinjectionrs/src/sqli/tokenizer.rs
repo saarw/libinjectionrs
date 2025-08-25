@@ -73,6 +73,41 @@ pub enum TokenType {
     Backslash,
 }
 
+impl TokenType {
+    pub fn to_char(&self) -> char {
+        match self {
+            TokenType::None => '\0',
+            TokenType::Keyword => 'k',
+            TokenType::Union => 'U',
+            TokenType::Group => 'B',
+            TokenType::Expression => 'E',
+            TokenType::SqlType => 't',
+            TokenType::Function => 'f',
+            TokenType::Bareword => 'n',
+            TokenType::Number => '1',
+            TokenType::Variable => 'v',
+            TokenType::String => 's',
+            TokenType::Operator => 'o',
+            TokenType::LogicOperator => '&',
+            TokenType::Comment => 'c',
+            TokenType::Collate => 'A',
+            TokenType::LeftParenthesis => '(',
+            TokenType::RightParenthesis => ')',
+            TokenType::LeftBrace => '{',
+            TokenType::RightBrace => '}',
+            TokenType::Dot => '.',
+            TokenType::Comma => ',',
+            TokenType::Colon => ':',
+            TokenType::Semicolon => ';',
+            TokenType::Tsql => 'T',
+            TokenType::Unknown => '?',
+            TokenType::Evil => 'X',
+            TokenType::Fingerprint => 'F',
+            TokenType::Backslash => '\\',
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Token {
     pub token_type: TokenType,
