@@ -348,11 +348,12 @@ impl<'a> SqliState<'a> {
                     self.token_vec[3].token_type == TokenType::LeftParenthesis &&
                     self.token_vec[4].token_type == TokenType::Bareword) {
                     if pos > LIBINJECTION_SQLI_MAX_TOKENS {
-                        // Copy token[5] to token[1]
+                        // Copy token[5] to token[1], reset to position 2
                         self.token_vec[1] = self.token_vec[LIBINJECTION_SQLI_MAX_TOKENS].clone();
                         pos = 2;
                         left = 0;
                     } else {
+                        // Reset to position 1 to continue processing
                         pos = 1;
                         left = 0;
                     }
@@ -387,6 +388,11 @@ impl<'a> SqliState<'a> {
             
             // Apply 2-token folding rules
             if self.apply_two_token_fold(left, &mut pos, &mut left) {
+                // Check for evil token that should cause early exit
+                if left + 1 < self.token_vec.len() && self.token_vec[left + 1].token_type == TokenType::Evil {
+                    left = pos;
+                    break;
+                }
                 continue;
             }
             
@@ -455,18 +461,43 @@ impl<'a> SqliState<'a> {
         match val.len() {
             1 => matches!(val.chars().next(), Some('+' | '-' | '!' | '~')),
             2 => val == "!!",
-            3 => val.to_ascii_uppercase() == "NOT",
+            3 => self.cstrcasecmp("NOT", val) == 0,
             _ => false,
         }
     }
     
     fn is_arithmetic_op(&self, token: &Token) -> bool {
-        if token.token_type != TokenType::Operator {
+        if token.token_type != TokenType::Operator || token.len != 1 {
             return false;
         }
         
-        let ch = token.value_as_str().chars().next().unwrap_or('\0');
-        matches!(ch, '+' | '-' | '*' | '/' | '%' | '^')
+        let ch = token.val[0] as char;
+        matches!(ch, '*' | '/' | '-' | '+' | '%')
+    }
+    
+    /// Case-insensitive string comparison that matches C's cstrcasecmp exactly
+    fn cstrcasecmp(&self, a: &str, b: &str) -> i32 {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let n = a_bytes.len();
+        
+        if n != b_bytes.len() {
+            return if a_bytes.len() < b_bytes.len() { -1 } else { 1 };
+        }
+        
+        for i in 0..n {
+            let mut cb = b_bytes[i];
+            if cb >= b'a' && cb <= b'z' {
+                cb -= 0x20;
+            }
+            if a_bytes[i] != cb {
+                return a_bytes[i] as i32 - cb as i32;
+            } else if a_bytes[i] == 0 {
+                return -1;
+            }
+        }
+        
+        if n == 0 { 0 } else { 0 }
     }
     
     fn check_special_5_token_patterns(&self) -> bool {
@@ -547,7 +578,7 @@ impl<'a> SqliState<'a> {
         }
         
         // Word merging - just check if it would merge
-        if self.can_merge_words(left) {
+        if self.syntax_merge_words(left) {
             *pos -= 1;
             self.stats_folds += 1;
             if *left_ptr > 0 {
@@ -600,7 +631,8 @@ impl<'a> SqliState<'a> {
         false
     }
     
-    fn can_merge_words(&self, left: usize) -> bool {
+    /// Syntax merge words - matches C's syntax_merge_words exactly
+    fn syntax_merge_words(&mut self, left: usize) -> bool {
         if left + 1 >= self.token_vec.len() {
             return false;
         }
@@ -608,28 +640,50 @@ impl<'a> SqliState<'a> {
         let a_type = self.token_vec[left].token_type;
         let b_type = self.token_vec[left + 1].token_type;
         
-        // Check if both tokens are mergeable types
-        let mergeable_types = [
-            TokenType::Keyword, TokenType::Bareword, TokenType::Operator,
-            TokenType::Union, TokenType::Function, TokenType::Expression,
-            TokenType::Tsql, TokenType::SqlType, TokenType::LogicOperator
-        ];
-        
-        if !mergeable_types.contains(&a_type) || !mergeable_types.contains(&b_type) {
+        // Check if token a is of right type
+        if !(a_type == TokenType::Keyword || a_type == TokenType::Bareword ||
+             a_type == TokenType::Operator || a_type == TokenType::Union ||
+             a_type == TokenType::Function || a_type == TokenType::Expression ||
+             a_type == TokenType::Tsql || a_type == TokenType::SqlType) {
             return false;
         }
         
+        // Check if token b is of right type  
+        if !(b_type == TokenType::Keyword || b_type == TokenType::Bareword ||
+             b_type == TokenType::Operator || b_type == TokenType::Union ||
+             b_type == TokenType::Function || b_type == TokenType::Expression ||
+             b_type == TokenType::Tsql || b_type == TokenType::SqlType ||
+             b_type == TokenType::LogicOperator) {
+            return false;
+        }
+        
+        let sz1 = self.token_vec[left].len;
+        let sz2 = self.token_vec[left + 1].len;
+        let sz3 = sz1 + sz2 + 1; // +1 for space in the middle
+        
+        if sz3 >= 32 { // make sure there is room for ending null
+            return false;
+        }
+        
+        // Create merged string: a.val + ' ' + b.val
         let a_val = self.token_vec[left].value_as_str();
         let b_val = self.token_vec[left + 1].value_as_str();
+        let merged = format!("{} {}", a_val, b_val).to_ascii_uppercase();
         
-        if a_val.len() + b_val.len() + 1 >= 32 {
-            return false;
+        let lookup_result = sqli_data::lookup_word(&merged);
+        
+        if lookup_result != TokenType::Bareword {
+            // Update the first token with merged value and new type
+            self.token_vec[left].token_type = lookup_result;
+            // Update the value - we need to store the merged value properly
+            let merged_bytes = merged.as_bytes();
+            let copy_len = merged_bytes.len().min(31); // Leave space for null terminator
+            self.token_vec[left].val[..copy_len].copy_from_slice(&merged_bytes[..copy_len]);
+            self.token_vec[left].len = copy_len;
+            return true;
         }
         
-        let merged = format!("{} {}", a_val, b_val);
-        let lookup_result = sqli_data::lookup_word(&merged.to_ascii_uppercase());
-        
-        lookup_result != TokenType::Bareword
+        false
     }
 
     // Apply all 2-token folding rules exactly as in C version
@@ -671,7 +725,7 @@ impl<'a> SqliState<'a> {
         }
         
         // Try word merging
-        if self.can_merge_words(left) {
+        if self.syntax_merge_words(left) {
             *pos -= 1;
             self.stats_folds += 1;
             if *left_ptr > 0 {
@@ -681,17 +735,128 @@ impl<'a> SqliState<'a> {
         }
         
         // Handle TSQL IF after semicolon
-        if t_left == TokenType::Semicolon && t_right == TokenType::Function {
-            let val = self.token_vec[left + 1].value_as_str().to_ascii_uppercase();
-            if val == "IF" {
-                self.token_vec[left + 1].token_type = TokenType::Tsql;
-                // Note: C code doesn't decrement pos here, just changes type
-                return false; // Continue processing but don't skip
+        if t_left == TokenType::Semicolon && t_right == TokenType::Function &&
+           self.token_vec[left + 1].len >= 2 &&
+           (self.token_vec[left + 1].val[0] == b'I' || self.token_vec[left + 1].val[0] == b'i') &&
+           (self.token_vec[left + 1].val[1] == b'F' || self.token_vec[left + 1].val[1] == b'f') {
+            self.token_vec[left + 1].token_type = TokenType::Tsql;
+            return true;
+        }
+        
+        // FOLD: (bareword|variable) + leftparens -> function (for specific functions)
+        if (t_left == TokenType::Bareword || t_left == TokenType::Variable) && 
+           t_right == TokenType::LeftParenthesis {
+            let val = self.token_vec[left].value_as_str();
+            if self.cstrcasecmp("USER_ID", val) == 0 ||
+               self.cstrcasecmp("USER_NAME", val) == 0 ||
+               self.cstrcasecmp("DATABASE", val) == 0 ||
+               self.cstrcasecmp("PASSWORD", val) == 0 ||
+               self.cstrcasecmp("USER", val) == 0 ||
+               self.cstrcasecmp("CURRENT_USER", val) == 0 ||
+               self.cstrcasecmp("CURRENT_DATE", val) == 0 ||
+               self.cstrcasecmp("CURRENT_TIME", val) == 0 ||
+               self.cstrcasecmp("CURRENT_TIMESTAMP", val) == 0 ||
+               self.cstrcasecmp("LOCALTIME", val) == 0 ||
+               self.cstrcasecmp("LOCALTIMESTAMP", val) == 0 {
+                self.token_vec[left].token_type = TokenType::Function;
+                return true;
             }
         }
         
-        // Many more 2-token rules from C code...
-        // For brevity, adding the most important ones
+        // FOLD: keyword IN/NOT_IN + leftparens -> operator, else -> bareword
+        if t_left == TokenType::Keyword {
+            let val = self.token_vec[left].value_as_str();
+            if self.cstrcasecmp("IN", val) == 0 || self.cstrcasecmp("NOT IN", val) == 0 {
+                if t_right == TokenType::LeftParenthesis {
+                    self.token_vec[left].token_type = TokenType::Operator;
+                } else {
+                    self.token_vec[left].token_type = TokenType::Bareword;
+                }
+                return true;
+            }
+        }
+        
+        // FOLD: operator LIKE/NOT_LIKE + leftparens -> function
+        if t_left == TokenType::Operator && t_right == TokenType::LeftParenthesis {
+            let val = self.token_vec[left].value_as_str();
+            if self.cstrcasecmp("LIKE", val) == 0 || self.cstrcasecmp("NOT LIKE", val) == 0 {
+                self.token_vec[left].token_type = TokenType::Function;
+            }
+        }
+        
+        // FOLD: sqltype + X -> X (remove sqltype)
+        if t_left == TokenType::SqlType &&
+           (t_right == TokenType::Bareword || t_right == TokenType::Number || 
+            t_right == TokenType::SqlType || t_right == TokenType::LeftParenthesis ||
+            t_right == TokenType::Function || t_right == TokenType::Variable ||
+            t_right == TokenType::String) {
+            self.token_vec[left] = self.token_vec[left + 1].clone();
+            *pos -= 1;
+            self.stats_folds += 1;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: collate + bareword -> handle collation types
+        if t_left == TokenType::Collate && t_right == TokenType::Bareword {
+            let val = self.token_vec[left + 1].value_as_str();
+            if val.contains('_') {
+                self.token_vec[left + 1].token_type = TokenType::SqlType;
+                *left_ptr = 0;
+            }
+        }
+        
+        // FOLD: backslash + arithmetic_op -> number, else copy
+        if t_left == TokenType::Backslash {
+            if self.is_arithmetic_op(&self.token_vec[left + 1]) {
+                self.token_vec[left].token_type = TokenType::Number;
+            } else {
+                self.token_vec[left] = self.token_vec[left + 1].clone();
+                *pos -= 1;
+                self.stats_folds += 1;
+            }
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: leftparens + leftparens -> leftparens
+        if t_left == TokenType::LeftParenthesis && t_right == TokenType::LeftParenthesis {
+            *pos -= 1;
+            *left_ptr = 0;
+            self.stats_folds += 1;
+            return true;
+        }
+        
+        // FOLD: rightparens + rightparens -> rightparens
+        if t_left == TokenType::RightParenthesis && t_right == TokenType::RightParenthesis {
+            *pos -= 1;
+            *left_ptr = 0;
+            self.stats_folds += 1;
+            return true;
+        }
+        
+        // FOLD: leftbrace + bareword -> special handling
+        if t_left == TokenType::LeftBrace && t_right == TokenType::Bareword {
+            if self.token_vec[left + 1].len == 0 {
+                self.token_vec[left + 1].token_type = TokenType::Evil;
+                // The C code returns (int)(left + 2) here, indicating early exit
+                // We'll need to handle this in the main folding loop
+                return false; 
+            }
+            // ODBC/MySQL {foo expr} -> expr, strip away "{ foo" part
+            *left_ptr = 0;
+            *pos -= 2;
+            self.stats_folds += 2;
+            return true;
+        }
+        
+        // FOLD: X + rightbrace -> X
+        if t_right == TokenType::RightBrace {
+            *pos -= 1;
+            *left_ptr = 0;
+            self.stats_folds += 1;
+            return true;
+        }
         
         false
     }
@@ -746,6 +911,20 @@ impl<'a> SqliState<'a> {
             return true;
         }
         
+        // FOLD: (bareword|number|string|variable) operator :: sqltype -> first (PostgreSQL casting)
+        if (self.token_vec[left].token_type == TokenType::Bareword ||
+            self.token_vec[left].token_type == TokenType::Number ||
+            self.token_vec[left].token_type == TokenType::Variable ||
+            self.token_vec[left].token_type == TokenType::String) &&
+           self.token_vec[left + 1].token_type == TokenType::Operator &&
+           self.token_vec[left + 1].len == 2 && self.token_vec[left + 1].val[0] == b':' && self.token_vec[left + 1].val[1] == b':' &&
+           self.token_vec[left + 2].token_type == TokenType::SqlType {
+            *pos -= 2;
+            *left_ptr = 0;
+            self.stats_folds += 2;
+            return true;
+        }
+        
         // FOLD: (bareword|number|string|variable) comma (number|bareword|string|variable) -> first_token
         if (self.token_vec[left].token_type == TokenType::Bareword ||
             self.token_vec[left].token_type == TokenType::Number ||
@@ -761,7 +940,89 @@ impl<'a> SqliState<'a> {
             return true;
         }
         
-        // Many more 3-token rules from C code...
+        // FOLD: (expression|group|comma) + unary_op + leftparens -> remove unary
+        if (self.token_vec[left].token_type == TokenType::Expression ||
+            self.token_vec[left].token_type == TokenType::Group ||
+            self.token_vec[left].token_type == TokenType::Comma) &&
+           self.is_unary_op(&self.token_vec[left + 1]) &&
+           self.token_vec[left + 2].token_type == TokenType::LeftParenthesis {
+            self.token_vec[left + 1] = self.token_vec[left + 2].clone();
+            *pos -= 1;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: (keyword|expression|group) + unary_op + (number|bareword|variable|string|function) -> remove unary
+        if (self.token_vec[left].token_type == TokenType::Keyword ||
+            self.token_vec[left].token_type == TokenType::Expression ||
+            self.token_vec[left].token_type == TokenType::Group) &&
+           self.is_unary_op(&self.token_vec[left + 1]) &&
+           (self.token_vec[left + 2].token_type == TokenType::Number ||
+            self.token_vec[left + 2].token_type == TokenType::Bareword ||
+            self.token_vec[left + 2].token_type == TokenType::Variable ||
+            self.token_vec[left + 2].token_type == TokenType::String ||
+            self.token_vec[left + 2].token_type == TokenType::Function) {
+            self.token_vec[left + 1] = self.token_vec[left + 2].clone();
+            *pos -= 1;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: comma + unary_op + (number|bareword|variable|string) -> remove unary, backup
+        if self.token_vec[left].token_type == TokenType::Comma &&
+           self.is_unary_op(&self.token_vec[left + 1]) &&
+           (self.token_vec[left + 2].token_type == TokenType::Number ||
+            self.token_vec[left + 2].token_type == TokenType::Bareword ||
+            self.token_vec[left + 2].token_type == TokenType::Variable ||
+            self.token_vec[left + 2].token_type == TokenType::String) {
+            self.token_vec[left + 1] = self.token_vec[left + 2].clone();
+            *left_ptr = 0;
+            // Back up to allow more folding
+            if *pos >= 3 {
+                *pos -= 3;
+            }
+            return true;
+        }
+        
+        // FOLD: comma + unary_op + function -> remove unary only
+        if self.token_vec[left].token_type == TokenType::Comma &&
+           self.is_unary_op(&self.token_vec[left + 1]) &&
+           self.token_vec[left + 2].token_type == TokenType::Function {
+            self.token_vec[left + 1] = self.token_vec[left + 2].clone();
+            *pos -= 1;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: bareword . bareword -> bareword (database.table -> table)
+        if self.token_vec[left].token_type == TokenType::Bareword &&
+           self.token_vec[left + 1].token_type == TokenType::Dot &&
+           self.token_vec[left + 2].token_type == TokenType::Bareword {
+            *pos -= 2;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: expression . bareword -> bareword (SELECT . `foo` -> SELECT `foo`)
+        if self.token_vec[left].token_type == TokenType::Expression &&
+           self.token_vec[left + 1].token_type == TokenType::Dot &&
+           self.token_vec[left + 2].token_type == TokenType::Bareword {
+            self.token_vec[left + 1] = self.token_vec[left + 2].clone();
+            *pos -= 1;
+            *left_ptr = 0;
+            return true;
+        }
+        
+        // FOLD: function + leftparens + (not rightparens) -> handle special functions
+        if self.token_vec[left].token_type == TokenType::Function &&
+           self.token_vec[left + 1].token_type == TokenType::LeftParenthesis &&
+           self.token_vec[left + 2].token_type != TokenType::RightParenthesis {
+            let val = self.token_vec[left].value_as_str();
+            if self.cstrcasecmp("USER", val) == 0 {
+                // USER() should have 0 args, if it has args it's not a function
+                self.token_vec[left].token_type = TokenType::Bareword;
+            }
+        }
         
         false
     }
