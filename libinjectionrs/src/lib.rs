@@ -12,7 +12,7 @@ use std::error::Error as StdError;
 pub mod sqli;
 pub mod xss;
 
-pub use sqli::{SqliDetector, SqliResult};
+pub use sqli::{SqliState, SqliFlags, Fingerprint};
 pub use xss::{XssDetector, XssResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,32 +38,7 @@ pub struct DetectionResult {
     pub confidence: f32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fingerprint {
-    inner: [u8; 8],
-}
-
-impl Fingerprint {
-    pub fn new(data: [u8; 8]) -> Self {
-        Self { inner: data }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.inner
-    }
-
-    pub fn as_str(&self) -> &str {
-        core::str::from_utf8(&self.inner)
-            .unwrap_or("")
-            .trim_end_matches('\0')
-    }
-}
-
-impl fmt::Display for Fingerprint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
+// Fingerprint is now exported from sqli module
 
 #[derive(Debug, Clone)]
 pub enum Error {
@@ -93,8 +68,17 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl StdError for Error {}
 
-pub fn detect_sqli(input: &[u8]) -> SqliResult {
-    SqliDetector::new().detect(input)
+pub fn detect_sqli(input: &[u8]) -> DetectionResult {
+    let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+    let is_sqli = state.detect();
+    let fp = state.get_fingerprint();
+    
+    DetectionResult {
+        is_injection: is_sqli,
+        injection_type: InjectionType::Sqli,
+        fingerprint: Some(fp),
+        confidence: if is_sqli { 1.0 } else { 0.0 },
+    }
 }
 
 pub fn detect_xss(input: &[u8]) -> XssResult {

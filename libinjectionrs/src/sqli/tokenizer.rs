@@ -33,7 +33,7 @@ const TYPE_FINGERPRINT: u8 = b'F';
 const TYPE_BACKSLASH: u8 = b'\\';
 
 // Character constants
-const CHAR_NULL: u8 = b'\0';
+pub(crate) const CHAR_NULL: u8 = b'\0';
 const CHAR_SINGLE: u8 = b'\'';
 const CHAR_DOUBLE: u8 = b'"';
 const CHAR_TICK: u8 = b'`';
@@ -261,17 +261,8 @@ impl<'a> SqliTokenizer<'a> {
         
         self.current.clear();
         
-        // Handle quote context at start of string
-        if self.pos == 0 && (self.flags.contains(SqliFlags::QUOTE_SINGLE) || self.flags.contains(SqliFlags::QUOTE_DOUBLE)) {
-            let delim = if self.flags.contains(SqliFlags::QUOTE_SINGLE) {
-                CHAR_SINGLE
-            } else {
-                CHAR_DOUBLE
-            };
-            let new_pos = self.parse_string_core(0, delim, 0);
-            self.pos = new_pos;
-            return Some(self.current.clone());
-        }
+        // Handle quote context at start of string (commented out for now - not in C impl)
+        // TODO: Add support for QUOTE_SINGLE and QUOTE_DOUBLE flags if needed
         
         while self.pos < self.input.len() {
             let ch = self.input[self.pos];
@@ -445,7 +436,7 @@ impl<'a> SqliTokenizer<'a> {
     
     fn parse_hash(&mut self) -> usize {
         self.stats_comment_hash += 1;
-        if self.flags.contains(SqliFlags::SQL_MYSQL) {
+        if self.flags.is_mysql() {
             // C version has a bug that increments stats_comment_hash twice in MySQL mode
             // We need to match this behavior exactly
             self.stats_comment_hash += 1;
@@ -468,7 +459,7 @@ impl<'a> SqliTokenizer<'a> {
             } else {
                 // "--" followed by non-whitespace: depends on SQL mode
                 self.stats_comment_ddx += 1;
-                if self.flags.contains(SqliFlags::SQL_ANSI) {
+                if self.flags.is_ansi() {
                     return self.parse_eol_comment();
                 } else {
                     // MySQL treats as two unary operators
