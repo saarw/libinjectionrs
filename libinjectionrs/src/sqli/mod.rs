@@ -299,6 +299,9 @@ impl<'a> SqliState<'a> {
         // Skip all initial comments, right-parens and unary operators
         while more {
             if let Some(token) = tokenizer.next_token() {
+                // Count all tokens processed for stats_tokens
+                self.stats_tokens += 1;
+                
                 self.token_vec[0] = token.clone();
                 if !(token.token_type == TokenType::Comment ||
                      token.token_type == TokenType::LeftParenthesis ||
@@ -368,6 +371,9 @@ impl<'a> SqliState<'a> {
             // Get up to two tokens
             while more && pos <= LIBINJECTION_SQLI_MAX_TOKENS && (pos - left) < 2 {
                 if let Some(token) = tokenizer.next_token() {
+                    // Count all tokens processed for stats_tokens
+                    self.stats_tokens += 1;
+                    
                     if token.token_type == TokenType::Comment {
                         last_comment = token;
                     } else {
@@ -399,6 +405,9 @@ impl<'a> SqliState<'a> {
             // All cases of handling 2 tokens is done, get one more token
             while more && pos <= LIBINJECTION_SQLI_MAX_TOKENS && pos - left < 3 {
                 if let Some(token) = tokenizer.next_token() {
+                    // Count all tokens processed for stats_tokens
+                    self.stats_tokens += 1;
+                    
                     if token.token_type == TokenType::Comment {
                         last_comment = token;
                     } else {
@@ -1234,6 +1243,8 @@ impl<'a> SqliState<'a> {
                 // 'sexy and 17' - not SQLi
                 return false;
             }
+            // If stats_tokens != 3, this means there's folding or more complex patterns
+            // Continue with default behavior (return true at end of function)
         }
         
         // More whitelist rules...
