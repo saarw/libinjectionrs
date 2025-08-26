@@ -678,15 +678,16 @@ impl<'a> SqliState<'a> {
         // Create merged string: a.val + ' ' + b.val
         let a_val = self.token_vec[left].value_as_str();
         let b_val = self.token_vec[left + 1].value_as_str();
-        let merged = format!("{} {}", a_val, b_val).to_ascii_uppercase();
+        let merged_original = format!("{} {}", a_val, b_val);
+        let merged_upper = merged_original.to_ascii_uppercase();
         
-        let lookup_result = sqli_data::lookup_word(&merged);
+        let lookup_result = sqli_data::lookup_word(&merged_upper);
         
         if lookup_result != TokenType::Bareword {
             // Update the first token with merged value and new type
             self.token_vec[left].token_type = lookup_result;
-            // Update the value - we need to store the merged value properly
-            let merged_bytes = merged.as_bytes();
+            // Update the value - store the original case version, not uppercase
+            let merged_bytes = merged_original.as_bytes();
             let copy_len = merged_bytes.len().min(31); // Leave space for null terminator
             self.token_vec[left].val[..copy_len].copy_from_slice(&merged_bytes[..copy_len]);
             self.token_vec[left].len = copy_len;
