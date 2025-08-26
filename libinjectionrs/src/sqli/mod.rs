@@ -395,12 +395,13 @@ impl<'a> SqliState<'a> {
             
             // Apply 2-token folding rules
             if self.apply_two_token_fold(left, &mut pos, &mut left) {
-                // Check for evil token that should cause early exit
-                if left + 1 < self.token_vec.len() && self.token_vec[left + 1].token_type == TokenType::Evil {
-                    left = pos;
-                    break;
-                }
                 continue;
+            }
+            
+            // Check for evil token that should cause early exit (regardless of folding result)
+            if left + 1 < self.token_vec.len() && self.token_vec[left + 1].token_type == TokenType::Evil {
+                left = pos;
+                break;
             }
             
             // All cases of handling 2 tokens is done, get one more token
