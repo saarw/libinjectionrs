@@ -363,6 +363,7 @@ impl<'a> SqliState<'a> {
                 }
             }
             
+            // Check termination condition - exit if no more tokens or we have enough
             if !more || left >= LIBINJECTION_SQLI_MAX_TOKENS {
                 left = pos;
                 break;

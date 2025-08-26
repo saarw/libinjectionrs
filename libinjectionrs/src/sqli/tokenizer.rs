@@ -822,8 +822,8 @@ impl<'a> SqliTokenizer<'a> {
         let pos = self.pos;
         let slen = self.input.len();
         
-        // Find word boundary
-        let word_chars = b" []{}\\<>:?=@!#~+-*/&|^%(),'	\n\x0B\x0C\r\"\xA0\x00";
+        // Find word boundary - matches C version's strlencspn character set
+        let word_chars = b" []{}<>:\\?=@!#~+-*/&|^%(),';	\n\x0B\x0C\r\"\xA0\x00";
         let mut end_pos = pos;
         
         while end_pos < slen && !word_chars.contains(&self.input[end_pos]) {

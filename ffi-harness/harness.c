@@ -14,22 +14,18 @@ sqli_result_t harness_detect_sqli(const char* input, size_t input_len, int flags
     // Detect SQL injection
     result.is_sqli = libinjection_is_sqli(&state);
     
-    // Get fingerprint from state
-    if (result.is_sqli) {
-        // Copy fingerprint and ensure null termination
-        memcpy(result.fingerprint, state.fingerprint, 8);
-        result.fingerprint[8] = '\0';
-        
-        // Find actual end of fingerprint (remove trailing nulls)
-        int end = 7;
-        while (end >= 0 && result.fingerprint[end] == '\0') {
-            end--;
-        }
-        if (end >= 0) {
-            result.fingerprint[end + 1] = '\0';
-        } else {
-            result.fingerprint[0] = '\0';
-        }
+    // Always get fingerprint from state, regardless of injection status
+    // Copy fingerprint and ensure null termination
+    memcpy(result.fingerprint, state.fingerprint, 8);
+    result.fingerprint[8] = '\0';
+    
+    // Find actual end of fingerprint (remove trailing nulls)
+    int end = 7;
+    while (end >= 0 && result.fingerprint[end] == '\0') {
+        end--;
+    }
+    if (end >= 0) {
+        result.fingerprint[end + 1] = '\0';
     } else {
         result.fingerprint[0] = '\0';
     }

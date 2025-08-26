@@ -109,12 +109,8 @@ fn call_c_sqli(input: &str, flags: i32) -> Result<CSqliResult> {
             flags,
         );
         
-        let fingerprint = if result.is_sqli != 0 {
-            let fp_cstr = std::ffi::CStr::from_ptr(result.fingerprint.as_ptr());
-            fp_cstr.to_string_lossy().into_owned()
-        } else {
-            String::new()
-        };
+        let fp_cstr = std::ffi::CStr::from_ptr(result.fingerprint.as_ptr());
+        let fingerprint = fp_cstr.to_string_lossy().into_owned();
         
         Ok(CSqliResult {
             is_injection: result.is_sqli != 0,
