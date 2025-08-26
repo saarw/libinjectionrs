@@ -154,21 +154,20 @@ impl Token {
     
     pub fn assign(&mut self, token_type: u8, pos: usize, len: usize, value: &[u8]) {
         let copy_len = len.min(LIBINJECTION_SQLI_TOKEN_SIZE - 1);
+        let actual_copy_len = copy_len.min(value.len());
         self.token_type = byte_to_token_type(token_type);
         self.pos = pos;
-        self.len = copy_len;
+        self.len = actual_copy_len;
         
         // Clear the value array first
         self.val = [0; 32];
         
         // Copy the value
-        for i in 0..copy_len {
-            if i < value.len() {
-                self.val[i] = value[i];
-            }
+        for i in 0..actual_copy_len {
+            self.val[i] = value[i];
         }
         
-        self.val[copy_len] = CHAR_NULL;
+        self.val[actual_copy_len] = CHAR_NULL;
         self.str_open = CHAR_NULL;
         self.str_close = CHAR_NULL;
         self.count = 0;
@@ -917,12 +916,14 @@ impl<'a> SqliTokenizer<'a> {
         }
         
         if end_pos == new_pos {
-            // Empty variable name
-            self.current.assign(TYPE_VARIABLE, new_pos, 0, &[]);
+            // Empty variable name (just @ or @@ symbols)
+            let var_slice = &self.input[self.pos..new_pos];
+            self.current.assign(TYPE_VARIABLE, self.pos, new_pos - self.pos, var_slice);
             new_pos
         } else {
-            let var_slice = &self.input[new_pos..end_pos];
-            self.current.assign(TYPE_VARIABLE, new_pos, end_pos - new_pos, var_slice);
+            // Non-empty variable (@ symbols + name)
+            let var_slice = &self.input[self.pos..end_pos];
+            self.current.assign(TYPE_VARIABLE, self.pos, end_pos - self.pos, var_slice);
             end_pos
         }
     }

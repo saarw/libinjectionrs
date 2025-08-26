@@ -127,7 +127,16 @@ fn run_folding_test(input: &str, expected: &str) -> bool {
         }
         
         let expected_type_char = parts[0].chars().next().unwrap();
-        let expected_value = parts[1..].join(" ");
+        let mut expected_value = parts[1..].join(" ");
+        
+        // Strip quotes from expected value for string tokens
+        if expected_type_char == 's' && expected_value.len() >= 2 {
+            let chars: Vec<char> = expected_value.chars().collect();
+            if (chars[0] == '"' && chars[chars.len()-1] == '"') ||
+               (chars[0] == '\'' && chars[chars.len()-1] == '\'') {
+                expected_value = expected_value[1..expected_value.len()-1].to_string();
+            }
+        }
         
         let actual_type_char = token.token_type.to_char();
         let actual_value = token.value_as_str();
