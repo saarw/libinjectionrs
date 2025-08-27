@@ -72,28 +72,41 @@ fn parse_test_file(content: &str) -> Option<(String, String, String)> {
     let mut test_name = None;
     let mut input = None;
     let mut expected = Vec::new();
-    let mut in_expected = false;
+    
+    let mut section = "";
     
     for line in lines {
         let line = line.trim();
         if line == "--TEST--" {
+            section = "test";
             continue;
         } else if line == "--INPUT--" {
-            in_expected = false;
+            section = "input";
             continue;
         } else if line == "--EXPECTED--" {
-            in_expected = true;
+            section = "expected";
             continue;
         } else if line.is_empty() {
             continue;
         }
         
-        if test_name.is_none() && !in_expected {
-            test_name = Some(line.to_string());
-        } else if input.is_none() && !in_expected {
-            input = Some(line.to_string());
-        } else if in_expected {
-            expected.push(line.to_string());
+        match section {
+            "test" => {
+                if test_name.is_none() {
+                    test_name = Some(line.to_string());
+                }
+                // Ignore any additional lines in test section (they are comments)
+            }
+            "input" => {
+                if input.is_none() {
+                    input = Some(line.to_string());
+                }
+                // Only take the first non-empty line as input
+            }
+            "expected" => {
+                expected.push(line.to_string());
+            }
+            _ => {}
         }
     }
     

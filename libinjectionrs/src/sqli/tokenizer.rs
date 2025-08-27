@@ -908,7 +908,7 @@ impl<'a> SqliTokenizer<'a> {
         }
         
         // Regular variable name
-        let var_chars = b" <>:?=@!#~+-*/&|^%(),'	\n\x0B\x0C\r'`\"";
+        let var_chars = b" <>:?=@!#~+-*/&|^%(),;'	\n\x0B\x0C\r'`\"";
         let mut end_pos = new_pos;
         
         while end_pos < slen && !var_chars.contains(&self.input[end_pos]) {

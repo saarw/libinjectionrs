@@ -68,4 +68,28 @@ mod tests {
         // This should include the semicolon
         assert!(fingerprint.as_str().contains(";"), "Fingerprint should contain semicolon");
     }
+    
+    #[test]
+    fn test_select_float_version() {
+        let input = "SELECT float @@version;";
+        let mut state = SqliState::from_string(input, SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+        
+        println!("Input: {}", input);
+        
+        let fingerprint = state.get_fingerprint();
+        println!("Rust fingerprint: {}", fingerprint);
+        
+        println!("Final tokens ({} total):", state.tokens.len());
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Token {}: type={:?}, val={:?} (pos: {}, len: {})", 
+                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+        }
+        
+        // According to test-folding-053.txt, expected tokens should be:
+        // E SELECT
+        // v @@version  
+        // ; ;
+        // So fingerprint should be "Ev;"
+        assert_eq!(fingerprint.as_str(), "Ev;", "Fingerprint should be Ev; for 'SELECT float @@version;'");
+    }
 }

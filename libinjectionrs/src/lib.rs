@@ -15,6 +15,18 @@ pub mod xss;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod debug_parsing;
+
+#[cfg(test)]
+mod debug_test_115;
+
+#[cfg(test)]
+mod debug_tokenization;
+
+#[cfg(test)]
+mod debug_folding;
+
 pub use sqli::{SqliState, SqliFlags, Fingerprint};
 pub use xss::{XssDetector, XssResult};
 
