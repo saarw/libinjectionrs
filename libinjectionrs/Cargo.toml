@@ -17,6 +17,7 @@ smallvec = { workspace = true, optional = true }
 serde_json = "1.0"
 
 [dev-dependencies]
+urlencoding = "2.0"
 
 [features]
 default = ["std", "smallvec"]

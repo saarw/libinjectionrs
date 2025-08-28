@@ -387,7 +387,8 @@ pub const BLACK_URL_PROTOCOLS: &[&str] = &[
     "DATA",
     "VIEW-SOURCE", 
     "VBSCRIPT",
-    "JAVA", // covers JAVA, JAVASCRIPT
+    "JAVA",
+    "JAVASCRIPT",
 ];
 
 pub fn html_decode_char_at(src: &[u8], consumed: &mut usize) -> i32 {
