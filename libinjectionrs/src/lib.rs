@@ -27,6 +27,10 @@ mod debug_tokenization;
 #[cfg(test)]
 mod debug_folding;
 
+#[cfg(test)]
+mod final_test;
+
+
 pub use sqli::{SqliState, SqliFlags, Fingerprint};
 pub use xss::{XssDetector, XssResult};
 
