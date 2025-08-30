@@ -895,13 +895,27 @@ impl<'a> SqliTokenizer<'a> {
         // Handle special cases like @@`version`
         if new_pos < slen {
             if self.input[new_pos] == b'`' {
+                // Save original position for variable
+                let var_start_pos = self.pos;
                 self.pos = new_pos;
                 let result = self.parse_tick();
+                
+                // Adjust the token to include the @ symbols
+                let full_length = result - var_start_pos;
+                let var_slice = &self.input[var_start_pos..result];
+                self.current.assign(TYPE_VARIABLE, var_start_pos, full_length, var_slice);
                 self.current.token_type = TokenType::Variable;
                 return result;
             } else if self.input[new_pos] == CHAR_SINGLE || self.input[new_pos] == CHAR_DOUBLE {
+                // Save original position for variable
+                let var_start_pos = self.pos;
                 self.pos = new_pos;
                 let result = self.parse_string();
+                
+                // Adjust the token to include the @ symbols
+                let full_length = result - var_start_pos;
+                let var_slice = &self.input[var_start_pos..result];
+                self.current.assign(TYPE_VARIABLE, var_start_pos, full_length, var_slice);
                 self.current.token_type = TokenType::Variable;
                 return result;
             }
