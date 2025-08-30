@@ -1170,7 +1170,20 @@ impl<'a> SqliTokenizer<'a> {
     }
     
     fn is_backslash_escaped(&self, pos: usize) -> bool {
-        pos > 0 && self.input[pos] == b'\\'
+        let mut backslash_count = 0;
+        let mut current_pos = pos;
+        
+        // Count consecutive backslashes backwards from pos (including pos itself)
+        while current_pos < self.input.len() && self.input[current_pos] == b'\\' {
+            backslash_count += 1;
+            if current_pos == 0 {
+                break;
+            }
+            current_pos -= 1;
+        }
+        
+        // If odd number of backslashes, the character after them is escaped
+        backslash_count & 1 == 1
     }
     
     fn is_double_delim_escaped(&self, pos: usize) -> bool {
