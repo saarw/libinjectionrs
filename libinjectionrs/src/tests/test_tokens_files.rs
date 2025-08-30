@@ -107,13 +107,23 @@ fn format_string_token(token: &Token) -> String {
 fn format_variable_token(token: &Token) -> String {
     let mut result = String::new();
     
-    // Add @ symbol if count >= 1 (like C testdriver)
-    if token.count >= 1 {
+    // Add @ symbols based on count (like C testdriver)
+    for _ in 0..token.count {
         result.push('@');
+    }
+    
+    // Add opening quote/backtick if present
+    if token.str_open != 0 {
+        result.push(token.str_open as char);
     }
     
     // Add variable name
     result.push_str(token.value_as_str());
+    
+    // Add closing quote/backtick if present  
+    if token.str_close != 0 {
+        result.push(token.str_close as char);
+    }
     
     result
 }
@@ -242,6 +252,35 @@ mod tests {
         }
         
         let expected = "E SELECT\nv @`foo``bar`\n; ;";
+        let actual = run_sqli_tokenization(input);
+        
+        println!("Expected:\n{}", expected);
+        println!("Actual:\n{}", actual);
+        
+        // Don't assert yet, just show the difference
+    }
+
+    #[test]
+    fn test_b_string_debug() {
+        // Debug the failing case from test-tokens-numbers-string-009.txt
+        let input = "SELECT b'";
+        println!("Input: {}", input);
+        
+        let input_bytes = input.as_bytes();
+        let flags = SqliFlags::FLAG_SQL_ANSI;
+        let mut tokenizer = SqliTokenizer::new(input_bytes, flags);
+        
+        println!("Tokens:");
+        let mut token_count = 0;
+        while let Some(token) = tokenizer.next_token() {
+            token_count += 1;
+            println!("  {}: Type: {:?} ({}), Value: {:?}, Pos: {}, Len: {}, str_open: {}, str_close: {}", 
+                     token_count, token.token_type, token_type_to_char(token.token_type), 
+                     token.value_as_str(), token.pos, token.len, token.str_open, token.str_close);
+        }
+        println!("  Total tokens: {}, Input length: {}", token_count, input.len());
+        
+        let expected = "E SELECT\nn b\ns '";
         let actual = run_sqli_tokenization(input);
         
         println!("Expected:\n{}", expected);

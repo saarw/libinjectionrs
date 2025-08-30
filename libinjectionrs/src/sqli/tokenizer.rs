@@ -147,9 +147,7 @@ impl Token {
         self.len = 1;
         self.val[0] = value;
         self.val[1] = CHAR_NULL;
-        self.str_open = CHAR_NULL;
-        self.str_close = CHAR_NULL;
-        self.count = 0;
+        // Note: str_open, str_close, and count are NOT reset to preserve variable info like C st_assign_char()
     }
     
     pub fn assign(&mut self, token_type: u8, pos: usize, len: usize, value: &[u8]) {
@@ -168,9 +166,7 @@ impl Token {
         }
         
         self.val[actual_copy_len] = CHAR_NULL;
-        self.str_open = CHAR_NULL;
-        self.str_close = CHAR_NULL;
-        self.count = 0;
+        // Note: str_open, str_close, and count are NOT reset to preserve variable info like C st_assign()
     }
     
     pub fn copy_from(&mut self, other: &Token) {
@@ -698,6 +694,7 @@ impl<'a> SqliTokenizer<'a> {
                     // Found unescaped closing delimiter
                     let content = &self.input[start_pos..actual_pos];
                     self.current.assign(TYPE_STRING, start_pos, actual_pos - start_pos, content);
+                    self.current.str_open = delim;
                     self.current.str_close = delim;
                     return actual_pos + 1;
                 }
@@ -705,12 +702,18 @@ impl<'a> SqliTokenizer<'a> {
                 // No closing delimiter found
                 let content = &self.input[start_pos..];
                 self.current.assign(TYPE_STRING, start_pos, slen - start_pos, content);
+                self.current.str_open = delim;
                 self.current.str_close = CHAR_NULL;
                 return slen;
             }
         }
         
-        // Shouldn't reach here
+        // Handle unterminated string at end of input (like C does)
+        let content = &self.input[start_pos..];
+        self.current.assign(TYPE_STRING, start_pos, slen - start_pos, content);
+        self.current.str_open = delim;
+        self.current.str_close = CHAR_NULL;
+        
         slen
     }
     
