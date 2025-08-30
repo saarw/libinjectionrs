@@ -571,9 +571,19 @@ impl<'a> SqliTokenizer<'a> {
     }
     
     fn parse_backslash(&mut self) -> usize {
-        let ch = self.input[self.pos];
-        self.current.assign_char(TYPE_BACKSLASH, self.pos, ch);
-        self.pos + 1
+        let pos = self.pos;
+        let slen = self.input.len();
+        
+        // Weird MySQL alias for NULL, "\N" (capital N only)
+        if pos + 1 < slen && self.input[pos + 1] == b'N' {
+            let content = &self.input[pos..pos + 2];
+            self.current.assign(TYPE_NUMBER, pos, 2, content);
+            pos + 2
+        } else {
+            let ch = self.input[pos];
+            self.current.assign_char(TYPE_BACKSLASH, pos, ch);
+            pos + 1
+        }
     }
     
     fn parse_eol_comment(&mut self) -> usize {
