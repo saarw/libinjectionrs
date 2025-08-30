@@ -475,48 +475,47 @@ impl<'a> SqliTokenizer<'a> {
     
     fn parse_operator2(&mut self) -> usize {
         let pos = self.pos;
-        let mut new_pos = pos + 1;
+        let slen = self.input.len();
         
-        // First check for 3-character operator <=>
-        if pos + 2 < self.input.len() && 
+        // Boundary check - if not enough characters for 2-char operator, fallback
+        if pos + 1 >= slen {
+            return self.parse_operator1();
+        }
+        
+        // First check for 3-character operator <=> (special case in C)
+        if pos + 2 < slen && 
            self.input[pos] == b'<' && self.input[pos + 1] == b'=' && self.input[pos + 2] == b'>' {
             let op = [b'<', b'=', b'>'];
             self.current.assign(TYPE_OPERATOR, pos, 3, &op);
             return pos + 3;
         }
         
-        if new_pos < self.input.len() {
-            let ch = self.input[pos];
-            let ch2 = self.input[new_pos];
-            
-            // Check for two-character operators
-            match (ch, ch2) {
-                // Logic operators (TYPE_LOGIC_OPERATOR)
-                (b'&', b'&') | (b'|', b'|') => {
-                    let op = [ch, ch2];
-                    self.current.assign(TYPE_LOGIC_OPERATOR, pos, 2, &op);
-                    new_pos += 1;
-                }
-                // Regular operators (TYPE_OPERATOR)
-                (b'!', b'=') | (b'<', b'=') | (b'>', b'=') | (b'<', b'>') |
-                (b'=', b'=') | (b'!', b'!') | (b':', b':') | 
-                (b'<', b'<') | (b'>', b'>') | (b'!', b'<') | (b'!', b'>') |
-                (b'<', b'@') | (b':', b'=') | (b'|', b'/') |
-                (b'*', b'=') | (b'&', b'=') | (b'|', b'=') => {
-                    let op = [ch, ch2];
-                    self.current.assign(TYPE_OPERATOR, pos, 2, &op);
-                    new_pos += 1;
-                }
-                _ => {
-                    self.current.assign_char(TYPE_OPERATOR, pos, ch);
-                }
+        // Try 2-character operator lookup using the comprehensive table
+        let two_char = &self.input[pos..pos + 2];
+        if let Ok(two_char_str) = std::str::from_utf8(two_char) {
+            let token_type = self.lookup_word(two_char_str);
+            if token_type != TokenType::None && token_type != TokenType::Bareword {
+                // Found a 2-character operator in the lookup table
+                let type_byte = match token_type {
+                    TokenType::Operator => TYPE_OPERATOR,
+                    TokenType::LogicOperator => TYPE_LOGIC_OPERATOR,
+                    _ => TYPE_OPERATOR, // Default fallback
+                };
+                self.current.assign(type_byte, pos, 2, two_char);
+                return pos + 2;
             }
-        } else {
-            let ch = self.input[pos];
-            self.current.assign_char(TYPE_OPERATOR, pos, ch);
         }
         
-        new_pos
+        // No 2-character operator found, check for special single character cases
+        let ch = self.input[pos];
+        if ch == b':' {
+            // Special case: ':' is not an operator, it's TYPE_COLON
+            self.current.assign_char(TYPE_COLON, pos, ch);
+            return pos + 1;
+        } else {
+            // Must be a single char operator - delegate to parse_operator1
+            return self.parse_operator1();
+        }
     }
     
     fn parse_other(&mut self) -> usize {
