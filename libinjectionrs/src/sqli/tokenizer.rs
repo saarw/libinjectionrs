@@ -477,15 +477,32 @@ impl<'a> SqliTokenizer<'a> {
         let pos = self.pos;
         let mut new_pos = pos + 1;
         
+        // First check for 3-character operator <=>
+        if pos + 2 < self.input.len() && 
+           self.input[pos] == b'<' && self.input[pos + 1] == b'=' && self.input[pos + 2] == b'>' {
+            let op = [b'<', b'=', b'>'];
+            self.current.assign(TYPE_OPERATOR, pos, 3, &op);
+            return pos + 3;
+        }
+        
         if new_pos < self.input.len() {
             let ch = self.input[pos];
             let ch2 = self.input[new_pos];
             
             // Check for two-character operators
             match (ch, ch2) {
+                // Logic operators (TYPE_LOGIC_OPERATOR)
+                (b'&', b'&') | (b'|', b'|') => {
+                    let op = [ch, ch2];
+                    self.current.assign(TYPE_LOGIC_OPERATOR, pos, 2, &op);
+                    new_pos += 1;
+                }
+                // Regular operators (TYPE_OPERATOR)
                 (b'!', b'=') | (b'<', b'=') | (b'>', b'=') | (b'<', b'>') |
-                (b'=', b'=') | (b'&', b'&') | (b'|', b'|') | (b'!', b'!') |
-                (b':', b':') => {
+                (b'=', b'=') | (b'!', b'!') | (b':', b':') | 
+                (b'<', b'<') | (b'>', b'>') | (b'!', b'<') | (b'!', b'>') |
+                (b'<', b'@') | (b':', b'=') | (b'|', b'/') |
+                (b'*', b'=') | (b'&', b'=') | (b'|', b'=') => {
                     let op = [ch, ch2];
                     self.current.assign(TYPE_OPERATOR, pos, 2, &op);
                     new_pos += 1;
@@ -1020,6 +1037,10 @@ impl<'a> SqliTokenizer<'a> {
         }
         
         if end_pos > pos + 1 {
+            // Check for special case: $. should be parsed as word
+            if end_pos == pos + 2 && self.input[pos + 1] == b'.' {
+                return self.parse_word();
+            }
             // Found numeric content
             let money_slice = &self.input[pos..end_pos];
             self.current.assign(TYPE_NUMBER, pos, end_pos - pos, money_slice);
