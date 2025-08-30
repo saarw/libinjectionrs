@@ -69,10 +69,53 @@ fn token_type_to_char(token_type: TokenType) -> char {
 
 fn format_token(token: &Token) -> String {
     let type_char = token_type_to_char(token.token_type);
-    let value = token.value_as_str();
+    let value = format_token_value(token);
     
     // Format as: "type_char value"
     format!("{} {}", type_char, value)
+}
+
+fn format_token_value(token: &Token) -> String {
+    match token.token_type {
+        TokenType::String => format_string_token(token),
+        TokenType::Variable => format_variable_token(token),
+        _ => token.value_as_str().to_string(),
+    }
+}
+
+// Equivalent to C print_string() function
+fn format_string_token(token: &Token) -> String {
+    let mut result = String::new();
+    
+    // Add opening quote if present
+    if token.str_open != 0 {
+        result.push(token.str_open as char);
+    }
+    
+    // Add content
+    result.push_str(token.value_as_str());
+    
+    // Add closing quote if present  
+    if token.str_close != 0 {
+        result.push(token.str_close as char);
+    }
+    
+    result
+}
+
+// Equivalent to C print_var() function
+fn format_variable_token(token: &Token) -> String {
+    let mut result = String::new();
+    
+    // Add @ symbol if count >= 1 (like C testdriver)
+    if token.count >= 1 {
+        result.push('@');
+    }
+    
+    // Add variable name
+    result.push_str(token.value_as_str());
+    
+    result
 }
 
 fn run_sqli_tokenization(input: &str) -> String {

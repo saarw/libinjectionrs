@@ -562,14 +562,15 @@ impl<'a> SqliTokenizer<'a> {
         let pos = self.pos;
         let slen = self.input.len();
         
-        if pos + 1 < slen && self.input[pos + 1] == b'*' {
-            // C-style comment /* ... */
-            self.stats_comment_c += 1;
-            self.parse_c_comment()
-        } else {
+        // Match C logic exactly: if (pos1 == slen || cs[pos1] != '*')
+        if pos + 1 == slen || self.input[pos + 1] != b'*' {
             // Regular operator
             self.current.assign_char(TYPE_OPERATOR, pos, b'/');
             pos + 1
+        } else {
+            // C-style comment /* ... */
+            self.stats_comment_c += 1;
+            self.parse_c_comment()
         }
     }
     
@@ -599,24 +600,75 @@ impl<'a> SqliTokenizer<'a> {
         }
     }
     
+    // Helper function equivalent to C memchr2: finds two consecutive characters
+    fn memchr2(&self, haystack: &[u8], c0: u8, c1: u8) -> Option<usize> {
+        if haystack.len() < 2 {
+            return None;
+        }
+        
+        for i in 0..haystack.len() - 1 {
+            if haystack[i] == c0 && haystack[i + 1] == c1 {
+                return Some(i);
+            }
+        }
+        None
+    }
+    
+    // Helper function equivalent to C is_mysql_comment
+    fn is_mysql_comment(&self, pos: usize) -> bool {
+        let slen = self.input.len();
+        
+        // Need at least 3 chars: /*!
+        if pos + 2 >= slen {
+            return false;
+        }
+        
+        // Check if it's /*!
+        self.input[pos] == b'/' && 
+        self.input[pos + 1] == b'*' && 
+        self.input[pos + 2] == b'!'
+    }
+    
     fn parse_c_comment(&mut self) -> usize {
         let pos = self.pos;
         let slen = self.input.len();
         
-        let mut end_pos = pos + 2; // Skip /*
+        // This implements the exact same logic as C parse_slash function
         
-        // Find */ or end of string
-        while end_pos + 1 < slen {
-            if self.input[end_pos] == b'*' && self.input[end_pos + 1] == b'/' {
-                end_pos += 2;
-                break;
+        // Search for */ in the part after /*
+        let search_slice = if pos + 2 < slen {
+            &self.input[pos + 2..]
+        } else {
+            &[]
+        };
+        
+        let clen = if let Some(close_pos) = self.memchr2(search_slice, b'*', b'/') {
+            // Found */: include everything from /* to */
+            (pos + 2) + close_pos + 2 - pos  // +2 to include the */
+        } else {
+            // No */ found: include everything to end of string
+            slen - pos
+        };
+        
+        let mut ctype = TYPE_COMMENT;
+        
+        // Check for nested comments or MySQL conditional comments
+        if let Some(close_pos) = self.memchr2(search_slice, b'*', b'/') {
+            // If we found */ and there's another /* inside the comment, mark as evil
+            let comment_content = &search_slice[..close_pos];
+            if self.memchr2(comment_content, b'/', b'*').is_some() {
+                ctype = TYPE_EVIL;
             }
-            end_pos += 1;
         }
         
-        let comment_slice = &self.input[pos..end_pos];
-        self.current.assign(TYPE_COMMENT, pos, end_pos - pos, comment_slice);
-        end_pos
+        // Check for MySQL conditional comments /*!
+        if self.is_mysql_comment(pos) {
+            ctype = TYPE_EVIL;
+        }
+        
+        let comment_slice = &self.input[pos..pos + clen];
+        self.current.assign(ctype, pos, clen, comment_slice);
+        pos + clen
     }
     
     fn parse_string(&mut self) -> usize {
@@ -895,27 +947,19 @@ impl<'a> SqliTokenizer<'a> {
         // Handle special cases like @@`version`
         if new_pos < slen {
             if self.input[new_pos] == b'`' {
-                // Save original position for variable
-                let var_start_pos = self.pos;
                 self.pos = new_pos;
                 let result = self.parse_tick();
                 
-                // Adjust the token to include the @ symbols
-                let full_length = result - var_start_pos;
-                let var_slice = &self.input[var_start_pos..result];
-                self.current.assign(TYPE_VARIABLE, var_start_pos, full_length, var_slice);
+                // Store only the backtick content (without @ symbols) like C
+                // The backtick content is already parsed correctly by parse_tick
                 self.current.token_type = TokenType::Variable;
                 return result;
             } else if self.input[new_pos] == CHAR_SINGLE || self.input[new_pos] == CHAR_DOUBLE {
-                // Save original position for variable
-                let var_start_pos = self.pos;
                 self.pos = new_pos;
                 let result = self.parse_string();
                 
-                // Adjust the token to include the @ symbols
-                let full_length = result - var_start_pos;
-                let var_slice = &self.input[var_start_pos..result];
-                self.current.assign(TYPE_VARIABLE, var_start_pos, full_length, var_slice);
+                // Store only the string content (without @ symbols) like C
+                // The string content is already parsed correctly by parse_string
                 self.current.token_type = TokenType::Variable;
                 return result;
             }
@@ -931,13 +975,14 @@ impl<'a> SqliTokenizer<'a> {
         
         if end_pos == new_pos {
             // Empty variable name (just @ or @@ symbols)
-            let var_slice = &self.input[self.pos..new_pos];
-            self.current.assign(TYPE_VARIABLE, self.pos, new_pos - self.pos, var_slice);
+            // Store empty content like C implementation
+            let var_slice = &self.input[new_pos..new_pos]; // Empty slice
+            self.current.assign(TYPE_VARIABLE, self.pos, 0, var_slice);
             new_pos
         } else {
-            // Non-empty variable (@ symbols + name)
-            let var_slice = &self.input[self.pos..end_pos];
-            self.current.assign(TYPE_VARIABLE, self.pos, end_pos - self.pos, var_slice);
+            // Non-empty variable - store only the name part (without @ symbols) like C
+            let var_slice = &self.input[new_pos..end_pos];
+            self.current.assign(TYPE_VARIABLE, self.pos, end_pos - new_pos, var_slice);
             end_pos
         }
     }
