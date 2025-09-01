@@ -1035,6 +1035,33 @@ impl<'a> SqliState<'a> {
             self.fingerprint[fp_idx] = 0;
             fp_idx += 1;
         }
+        
+        // Handle Evil tokens exactly like C implementation
+        // If any Evil token ('X') is present in the fingerprint, clear everything
+        // and set the fingerprint to just 'X' to match C behavior
+        let fingerprint_slice = &self.fingerprint[..8];
+        if fingerprint_slice.contains(&b'X') {
+            // Clear the entire fingerprint and token vector
+            self.fingerprint = [0; 8];
+            self.fingerprint[0] = b'X';
+            
+            // Reset the token vector to contain just the Evil token
+            // to match C's behavior of clearing tokenvec and setting first token to Evil
+            if !self.tokens.is_empty() {
+                self.tokens.clear();
+                let mut val = [0u8; 32];
+                val[0] = b'X';
+                self.tokens.push(Token {
+                    token_type: TokenType::Evil,
+                    pos: 0,
+                    len: 1,
+                    val,
+                    str_open: 0,
+                    str_close: 0,
+                    count: 0,
+                });
+            }
+        }
     }
     
     fn check_is_sqli(&self, fingerprint: &Fingerprint) -> bool {

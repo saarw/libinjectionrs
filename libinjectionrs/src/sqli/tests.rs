@@ -202,4 +202,33 @@ mod tests {
         // but we should have consistent behavior
         println!("Generated fingerprint: '{}'", fp_none.as_str());
     }
+
+    #[test]
+    fn test_evil_token_fingerprint_reset() {
+        // Test case for fuzz differential input "0{`"
+        // This input should generate Evil tokens and trigger fingerprint reset logic
+        // to match C implementation behavior
+        let input = "0{`";
+        let mut state = SqliState::new(input.as_bytes(), SqliFlags::FLAG_SQL_ANSI);
+        
+        // Get the fingerprint
+        let fingerprint = state.get_fingerprint();
+        
+        // The C implementation resets any fingerprint containing Evil tokens to just "X"
+        // so the Rust implementation should do the same
+        assert_eq!(fingerprint.as_str(), "X", 
+                   "Fingerprint should be reset to 'X' when Evil tokens are present");
+        
+        // Test that this is detected as SQL injection (like C implementation)
+        let is_injection = state.detect();
+        assert_eq!(is_injection, true,
+                   "Input '0{{`' should be detected as SQL injection like C implementation");
+        
+        // Verify that the token vector was also reset to contain just the Evil token
+        assert_eq!(state.tokens.len(), 1, "Should have exactly 1 token after Evil reset");
+        assert_eq!(state.tokens[0].token_type, TokenType::Evil, 
+                   "Single remaining token should be Evil type");
+        assert_eq!(state.tokens[0].value_as_str(), "X", 
+                   "Evil token value should be 'X'");
+    }
 }
