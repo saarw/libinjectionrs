@@ -169,4 +169,37 @@ mod tests {
         // The double quote context version should be detected as SQLi
         assert!(state_double_quote.check_is_sqli(&fp_double), "Double quote context should detect as SQLi");
     }
+    
+    #[test]
+    fn test_fuzz_crash_252_34_35_34() {
+        // This test case was found by fuzzing and represents a differential
+        // between the C and Rust implementations.
+        // Input: [252, 34, 35, 34] which is [0xFC, 0x22, 0x23, 0x22] or "\xfc\"#\""
+        // Expected behavior: should match C implementation exactly
+        
+        let input = [252u8, 34, 35, 34];
+        
+        // Test with detect_sqli (public API)
+        let result = crate::detect_sqli(&input);
+        
+        // The C implementation returns false for this input
+        // The issue was that Rust was returning true due to incorrect handling
+        // of hash characters in string contexts during quote context switching
+        assert_eq!(result.is_injection(), false, 
+                   "Input [252, 34, 35, 34] should be detected as non-SQLi to match C implementation");
+        
+        // Test with direct state API  
+        let mut state = SqliState::new(&input, SqliFlags::FLAG_SQL_ANSI);
+        let detect_result = state.detect();
+        assert_eq!(detect_result, false,
+                   "Direct detect() call should return false for input [252, 34, 35, 34]");
+        
+        // Test fingerprint generation in different contexts
+        let mut state_none = SqliState::new(&input, SqliFlags::FLAG_SQL_ANSI);
+        let fp_none = state_none.get_fingerprint();
+        
+        // The exact fingerprint isn't as important as the final result being false,
+        // but we should have consistent behavior
+        println!("Generated fingerprint: '{}'", fp_none.as_str());
+    }
 }

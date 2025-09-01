@@ -1175,6 +1175,12 @@ impl<'a> SqliState<'a> {
         
         // String concatenation patterns: ...foo' + 'bar...
         if fingerprint_str == "sos" || fingerprint_str == "s&s" {
+            // If token 1 value starts with '#', ignore - too many false positives
+            // This matches C behavior at libinjection_sqli.c:2078
+            if self.tokens.len() > 1 && !self.tokens[1].val.is_empty() && self.tokens[1].val[0] == b'#' {
+                return false;
+            }
+            
             if self.tokens[0].str_open == CHAR_NULL &&
                self.tokens[2].str_close == CHAR_NULL &&
                self.tokens[0].str_close == self.tokens[2].str_open {
