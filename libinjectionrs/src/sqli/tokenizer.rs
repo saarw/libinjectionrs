@@ -1144,7 +1144,8 @@ impl<'a> SqliTokenizer<'a> {
     // Helper functions
     
     fn is_white_char(&self, ch: u8) -> bool {
-        matches!(ch, b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r' | 0 | 160)
+        use crate::sqli::sqli_data::{get_char_type, CharType};
+        matches!(get_char_type(ch), CharType::White)
     }
     
     fn memchr(&self, needle: u8, haystack: &[u8]) -> Option<usize> {
