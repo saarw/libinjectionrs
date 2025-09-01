@@ -1,0 +1,21 @@
+[package]
+name = "libinjection-debug"
+version = "0.1.0"
+edition = "2021"
+authors = ["libinjectionrs contributors"]
+description = "Comprehensive debugging tool for libinjection tokenization"
+
+[workspace]
+
+[dependencies]
+libinjectionrs = { path = "../libinjectionrs" }
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+colored = "2.0"
+base64 = "0.21"
+
+[[bin]]
+name = "libinjection-debug"
+path = "src/main.rs"
