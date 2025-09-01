@@ -17,11 +17,12 @@ fn main() {
     println!("\n=== SQL Injection Detection ===");
     for (i, payload) in sqli_samples.iter().enumerate() {
         let result = detect_sqli(payload.as_bytes());
-        let fingerprint_str = result.fingerprint()
+        let fingerprint_str = result.fingerprint
+            .as_ref()
             .map(|fp| fp.to_string())
             .unwrap_or_else(|| "none".to_string());
         
-        let status = if result.is_injection() { "🔴 DETECTED" } else { "🟢 CLEAN" };
+        let status = if result.is_injection { "🔴 DETECTED" } else { "🟢 CLEAN" };
         println!("{}: {} -> {} (fingerprint: {})", 
                 i+1, status, payload, fingerprint_str);
     }
@@ -57,7 +58,7 @@ fn main() {
         let sqli_result = detect_sqli(content.as_bytes());
         let xss_result = detect_xss(content.as_bytes());
         
-        let sqli_status = if sqli_result.is_injection() { "🔴 SQLI" } else { "🟢 OK" };
+        let sqli_status = if sqli_result.is_injection { "🔴 SQLI" } else { "🟢 OK" };
         let xss_status = if xss_result.is_injection() { "🔴 XSS" } else { "🟢 OK" };
         
         println!("{}: {} | {} -> {}", i+1, sqli_status, xss_status, content);
