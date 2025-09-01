@@ -291,11 +291,11 @@ impl<'a> SqliTokenizer<'a> {
         
         self.current.clear();
         
-        // Handle quote context at start of string
+        // Handle quote context at start of string - matches C behavior
         let quote_context = self.flags.quote_context();
         if self.pos == 0 && quote_context != b'\0' {
-            // We're starting with a quote context, so the entire input should be treated as a string
-            return self.handle_quote_context(quote_context);
+            // FIXED: Parse only first token as string like C does with parse_string_core
+            return self.parse_first_token_with_quote_context(quote_context);
         }
         
         while self.pos < self.input.len() {
@@ -311,47 +311,54 @@ impl<'a> SqliTokenizer<'a> {
         None
     }
     
-    fn handle_quote_context(&mut self, quote_char: u8) -> Option<Token> {
-        // When in quote context, parse the input as if it started with the quote character
-        // Look for the closing quote of the same type
-        let mut end_pos = self.pos;
-        let mut in_string = true;
+    fn parse_first_token_with_quote_context(&mut self, quote_char: u8) -> Option<Token> {
+        // FIXED: This matches C's parse_string_core behavior exactly
+        // C call: parse_string_core(s, slen, 0, current, flag2delim(sf->flags), 0);
+        // Parameters: input, len, pos=0, token, delimiter, offset=0
         
-        while end_pos < self.input.len() && in_string {
-            if self.input[end_pos] == quote_char {
-                // Found potential closing quote
-                if self.is_double_delim_escaped(end_pos) {
-                    // Escaped quote (e.g. '' in SQL), skip both
-                    end_pos += 2;
+        let start_pos = self.pos; // Should be 0 for first token
+        
+        // Find first occurrence of quote_char (like C's memchr call)
+        let mut quote_pos = None;
+        let mut search_pos = start_pos;
+        
+        while search_pos < self.input.len() {
+            if self.input[search_pos] == quote_char {
+                // Check if this quote is escaped
+                if self.is_double_delim_escaped(search_pos) {
+                    // Skip escaped quote pair
+                    search_pos += 2;
                     continue;
-                } else if end_pos > 0 && self.is_backslash_escaped(end_pos - 1) {
-                    // Backslash escaped
-                    end_pos += 1;
+                } else if search_pos > 0 && self.is_backslash_escaped(search_pos - 1) {
+                    // Skip backslash escaped quote
+                    search_pos += 1;
                     continue;
                 } else {
-                    // Found unescaped closing quote
-                    in_string = false;
+                    // Found unescaped quote
+                    quote_pos = Some(search_pos);
                     break;
                 }
             } else {
-                end_pos += 1;
+                search_pos += 1;
             }
         }
         
-        if in_string {
-            // No closing quote found, treat entire rest of input as string
-            let content = &self.input[self.pos..];
-            self.current.assign(TYPE_STRING, self.pos, self.input.len() - self.pos, content);
-            self.current.str_open = quote_char;
-            self.current.str_close = CHAR_NULL;
-            self.pos = self.input.len();
-        } else {
-            // Found closing quote
-            let content = &self.input[self.pos..end_pos];
-            self.current.assign(TYPE_STRING, self.pos, end_pos - self.pos, content);
-            self.current.str_open = quote_char;
+        // Set string open/close info like C does
+        // offset = 0 means simulated quote, so str_open = CHAR_NULL
+        self.current.str_open = CHAR_NULL;
+        
+        if let Some(end_pos) = quote_pos {
+            // Found closing quote - parse up to that point
+            let content = &self.input[start_pos..end_pos];
+            self.current.assign(TYPE_STRING, start_pos, end_pos - start_pos, content);
             self.current.str_close = quote_char;
             self.pos = end_pos + 1; // Skip the closing quote
+        } else {
+            // No closing quote found - parse entire remaining input
+            let content = &self.input[start_pos..];
+            self.current.assign(TYPE_STRING, start_pos, self.input.len() - start_pos, content);
+            self.current.str_close = CHAR_NULL;
+            self.pos = self.input.len();
         }
         
         Some(self.current.clone())

@@ -140,4 +140,33 @@ mod tests {
         // So fingerprint should be "Ev;"
         assert_eq!(fingerprint.as_str(), "Ev;", "Fingerprint should be Ev; for 'SELECT float @@version;'");
     }
+
+    #[test]
+    fn test_quote_context_differential_fuzzing_case() {
+        // Test for the specific input that caused differential fuzzing failure
+        // Input: [35, 254, 34, 126, 34] which is "#\xfe\"~\""
+        // This test ensures the Rust implementation matches C behavior
+        let input = [35u8, 254, 34, 126, 34];
+        
+        // Test the public API
+        let result = crate::detect_sqli(&input);
+        
+        // The fix should make this behave like C implementation:
+        // - Both should detect it as SQLi: true
+        // - Both should generate fingerprint "sos"
+        assert_eq!(result.is_injection(), true, "Should detect SQLi like C implementation");
+        assert_eq!(result.fingerprint.as_ref().map(|f| f.as_str()), Some("sos"), "Should generate 'sos' fingerprint like C implementation");
+        
+        // Test the internal state with different quote contexts
+        let mut state_ansi = SqliState::new(&input, SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+        let fp_ansi = state_ansi.fingerprint();
+        assert_eq!(fp_ansi.as_str(), "ons", "ANSI context should produce 'ons' fingerprint");
+        
+        let mut state_double_quote = SqliState::new(&input, SqliFlags::new(SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+        let fp_double = state_double_quote.fingerprint();
+        assert_eq!(fp_double.as_str(), "sos", "Double quote context should produce 'sos' fingerprint");
+        
+        // The double quote context version should be detected as SQLi
+        assert!(state_double_quote.check_is_sqli(&fp_double), "Double quote context should detect as SQLi");
+    }
 }
