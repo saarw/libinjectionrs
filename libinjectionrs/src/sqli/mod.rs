@@ -222,17 +222,12 @@ impl<'a> SqliState<'a> {
         }
         
         // If input has a double quote, test as if input was actually preceded by "
+        // C only uses MySQL mode for double quotes (libinjection_sqli.c:2303-2304)
         if self.input.contains(&b'"') {
-            self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+            self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
             let fingerprint = self.fingerprint();
             if self.check_is_sqli(&fingerprint) {
                 return true;
-            } else if self.reparse_as_mysql() {
-                self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
-                let fingerprint = self.fingerprint();
-                if self.check_is_sqli(&fingerprint) {
-                    return true;
-                }
             }
         }
         
@@ -1100,9 +1095,9 @@ impl<'a> SqliState<'a> {
             }
         }
         
-        // If comment is '#' ignore - too many false positives
-        if self.tokens[1].token_type == TokenType::Comment &&
-           self.tokens[1].val[0] == b'#' {
+        // If second token starts with '#' ignore - too many false positives
+        // This matches C behavior at libinjection_sqli.c:2078
+        if !self.tokens[1].val.is_empty() && self.tokens[1].val[0] == b'#' {
             return false;
         }
         
@@ -1175,24 +1170,21 @@ impl<'a> SqliState<'a> {
         
         // String concatenation patterns: ...foo' + 'bar...
         if fingerprint_str == "sos" || fingerprint_str == "s&s" {
-            // If token 1 value starts with '#', ignore - too many false positives
-            // This matches C behavior at libinjection_sqli.c:2078
-            if self.tokens.len() > 1 && !self.tokens[1].val.is_empty() && self.tokens[1].val[0] == b'#' {
-                return false;
-            }
-            
             if self.tokens[0].str_open == CHAR_NULL &&
                self.tokens[2].str_close == CHAR_NULL &&
                self.tokens[0].str_close == self.tokens[2].str_open {
                 // Pattern like ....foo" + "bar....
+                // This matches C behavior at libinjection_sqli.c:2169-2177
                 return true;
             }
             
             if self.stats_tokens == 3 {
+                // This matches C behavior at libinjection_sqli.c:2179-2181
                 return false;
             }
             
             // Not SQLi
+            // This matches C behavior at libinjection_sqli.c:2187-2188
             return false;
         }
         
