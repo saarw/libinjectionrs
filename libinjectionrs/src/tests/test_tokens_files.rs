@@ -11,57 +11,81 @@ use crate::sqli::{SqliFlags, SqliTokenizer, Token, TokenType};
 #[derive(Debug)]
 struct TestCase {
     name: String,
-    input: String,
+    input: Vec<u8>,  // Changed to Vec<u8> to preserve raw bytes
     expected: String,
 }
 
-fn parse_test_file(content: &str) -> Option<TestCase> {
-    let lines = content.lines();
+fn parse_test_file(raw_bytes: &[u8]) -> Option<TestCase> {
+    // Parse the file preserving raw bytes for the input section
     let mut state = 0; // 0=looking for --TEST--, 1=reading test name, 2=reading input, 3=reading expected
     let mut test_name = String::new();
-    let mut input = String::new();
+    let mut input_bytes = Vec::new();
     let mut expected = String::new();
-
-    for line in lines {
-        match state {
-            0 => {
-                if line == "--TEST--" {
-                    state = 1;
-                }
-            }
-            1 => {
-                if line == "--INPUT--" {
-                    state = 2;
-                } else if !line.is_empty() {
-                    test_name.push_str(line);
-                }
-            }
-            2 => {
-                if line == "--EXPECTED--" {
-                    state = 3;
-                } else {
-                    if !input.is_empty() {
-                        input.push('\n');
+    let mut line_start = 0;
+    let mut first_input_line = true;
+    
+    // Process line by line, but keep raw bytes for input section
+    for (i, &byte) in raw_bytes.iter().enumerate() {
+        if byte == b'\n' || i == raw_bytes.len() - 1 {
+            let line_end = if byte == b'\n' { i } else { i + 1 };
+            let line_bytes = &raw_bytes[line_start..line_end];
+            
+            // Convert line to string for parsing structure (except for input content)
+            let line_str = if state == 2 {
+                // For input section, we'll handle this separately
+                String::new()
+            } else {
+                String::from_utf8_lossy(line_bytes).trim_end().to_string()
+            };
+            
+            match state {
+                0 => {
+                    if line_str == "--TEST--" {
+                        state = 1;
                     }
-                    input.push_str(line);
                 }
-            }
-            3 => {
-                if !line.is_empty() {
-                    if !expected.is_empty() {
-                        expected.push('\n');
+                1 => {
+                    if line_str == "--INPUT--" {
+                        state = 2;
+                        first_input_line = true;
+                    } else if !line_str.is_empty() {
+                        test_name.push_str(&line_str);
                     }
-                    expected.push_str(line);
                 }
+                2 => {
+                    let line_str = String::from_utf8_lossy(line_bytes).to_string();
+                    if line_str.trim() == "--EXPECTED--" {
+                        state = 3;
+                    } else {
+                        // Add raw bytes to input, preserving original bytes including invalid UTF-8
+                        if !first_input_line {
+                            input_bytes.push(b'\n');
+                        }
+                        first_input_line = false;
+                        
+                        // Add the line bytes directly (without the newline, we'll add it above)
+                        input_bytes.extend_from_slice(line_bytes);
+                    }
+                }
+                3 => {
+                    if !line_str.is_empty() {
+                        if !expected.is_empty() {
+                            expected.push('\n');
+                        }
+                        expected.push_str(&line_str);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+            
+            line_start = i + 1;
         }
     }
 
     if state == 3 {
         Some(TestCase {
             name: test_name,
-            input,
+            input: input_bytes,
             expected,
         })
     } else {
@@ -77,8 +101,12 @@ fn format_token(token: &Token) -> String {
     let type_char = token_type_to_char(token.token_type);
     let value = format_token_value(token);
     
-    // Format as: "type_char value"
-    format!("{} {}", type_char, value)
+    // Format as: "type_char value" but avoid trailing space for empty values
+    if value.is_empty() {
+        format!("{}", type_char)
+    } else {
+        format!("{} {}", type_char, value)
+    }
 }
 
 fn format_token_value(token: &Token) -> String {
@@ -141,10 +169,9 @@ fn format_variable_token(token: &Token) -> String {
     result
 }
 
-fn run_sqli_tokenization(input: &str) -> String {
-    let input_bytes = input.as_bytes();
+fn run_sqli_tokenization(input: &[u8]) -> String {
     let flags = SqliFlags::FLAG_SQL_ANSI;
-    let mut tokenizer = SqliTokenizer::new(input_bytes, flags);
+    let mut tokenizer = SqliTokenizer::new(input, flags);
     let mut result = Vec::new();
 
     while let Some(token) = tokenizer.next_token() {
@@ -155,18 +182,20 @@ fn run_sqli_tokenization(input: &str) -> String {
 }
 
 fn run_single_tokens_test(file_path: &Path) -> Result<(), String> {
-    let content = fs::read_to_string(file_path)
+    // Read raw bytes to match C behavior which doesn't validate UTF-8
+    let bytes = fs::read(file_path)
         .map_err(|e| format!("Failed to read file {:?}: {}", file_path, e))?;
 
-    let test_case = parse_test_file(&content)
+    let test_case = parse_test_file(&bytes)
         .ok_or_else(|| format!("Failed to parse test file {:?}", file_path))?;
 
     let actual = run_sqli_tokenization(&test_case.input);
 
     if actual != test_case.expected {
+        let input_display = String::from_utf8_lossy(&test_case.input);
         return Err(format!(
-            "Test failed for {:?}\nTest: {}\nInput: {:?}\nExpected:\n{}\nActual:\n{}",
-            file_path, test_case.name, test_case.input, test_case.expected, actual
+            "Test failed for {:?}\nTest: {}\nInput: {:?} (bytes: {:?})\nExpected:\n{}\nActual:\n{}",
+            file_path, test_case.name, input_display, test_case.input, test_case.expected, actual
         ));
     }
 
@@ -237,7 +266,7 @@ mod tests {
         // Test a simple case first based on test-tokens-numbers-string-001.txt
         let input = "SELECT x'1234';";
         let expected = "E SELECT\n1 x'1234'\n; ;";
-        let actual = run_sqli_tokenization(input);
+        let actual = run_sqli_tokenization(input.as_bytes());
         
         // For debugging, let's print the actual result first
         println!("Input: {}", input);
@@ -265,7 +294,7 @@ mod tests {
         }
         
         let expected = "E SELECT\nv @`foo``bar`\n; ;";
-        let actual = run_sqli_tokenization(input);
+        let actual = run_sqli_tokenization(input.as_bytes());
         
         println!("Expected:\n{}", expected);
         println!("Actual:\n{}", actual);
@@ -294,7 +323,7 @@ mod tests {
         println!("  Total tokens: {}, Input length: {}", token_count, input.len());
         
         let expected = "E SELECT\nn b\ns '";
-        let actual = run_sqli_tokenization(input);
+        let actual = run_sqli_tokenization(input.as_bytes());
         
         println!("Expected:\n{}", expected);
         println!("Actual:\n{}", actual);
@@ -311,7 +340,7 @@ mod tests {
         println!("UTF-8 bytes: {:?}", input.as_bytes());
         
         let expected = "E SELECT\nn テスト\n; ;";
-        let actual = run_sqli_tokenization(input);
+        let actual = run_sqli_tokenization(input.as_bytes());
         
         println!("Expected:\n{}", expected);
         println!("Actual:\n{}", actual);
