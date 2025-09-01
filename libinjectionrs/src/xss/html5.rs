@@ -49,6 +49,7 @@ pub struct Html5State<'a> {
     pub token_start: &'a [u8],
     pub token_len: usize,
     state_fn: fn(&mut Html5State<'a>) -> bool,
+    is_close: bool,
 }
 
 impl<'a> Html5State<'a> {
@@ -69,6 +70,7 @@ impl<'a> Html5State<'a> {
             token_start: input,
             token_len: 0,
             state_fn,
+            is_close: false,
         }
     }
 
@@ -113,18 +115,90 @@ impl<'a> Html5State<'a> {
         self.token_len = len;
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_whitespace(&mut self) -> Option<u8> {
         while let Some(ch) = self.current_char() {
             if Self::is_whitespace(ch) {
                 self.advance();
             } else {
+                return Some(ch);
+            }
+        }
+        None
+    }
+
+    fn find_byte(&self, byte: u8, start: usize) -> Option<usize> {
+        if start >= self.len {
+            return None;
+        }
+        
+        for i in start..self.len {
+            if self.s[i] == byte {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn find_comment_end(&self, start: usize) -> Option<(usize, usize)> {
+        if start + 2 >= self.len {
+            return None;
+        }
+        
+        let mut pos = start;
+        while pos <= self.len - 3 {
+            if let Some(dash_pos) = self.find_byte(b'-', pos) {
+                if dash_pos + 2 >= self.len {
+                    break;
+                }
+                
+                let mut offset = 1;
+                // Skip nulls (IE-ism)
+                while dash_pos + offset < self.len && self.s[dash_pos + offset] == 0 {
+                    offset += 1;
+                }
+                
+                if dash_pos + offset >= self.len {
+                    break;
+                }
+                
+                let next_char = self.s[dash_pos + offset];
+                if next_char != b'-' && next_char != b'!' {
+                    pos = dash_pos + 1;
+                    continue;
+                }
+                
+                offset += 1;
+                if dash_pos + offset >= self.len {
+                    break;
+                }
+                
+                if self.s[dash_pos + offset] == b'>' {
+                    return Some((dash_pos, offset + 1));
+                }
+                
+                pos = dash_pos + 1;
+            } else {
                 break;
             }
         }
+        None
+    }
+
+    fn find_cdata_end(&self, start: usize) -> Option<usize> {
+        if start + 2 >= self.len {
+            return None;
+        }
+        
+        for i in start..self.len - 2 {
+            if self.s[i] == b']' && self.s[i + 1] == b']' && self.s[i + 2] == b'>' {
+                return Some(i);
+            }
+        }
+        None
     }
 
     fn is_whitespace(ch: u8) -> bool {
-        matches!(ch, b' ' | b'\t' | b'\n' | b'\r' | b'\x0C')
+        matches!(ch, 0x00 | 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D)
     }
 
     fn state_eof(&mut self) -> bool {
@@ -133,25 +207,26 @@ impl<'a> Html5State<'a> {
 
     fn state_data(&mut self) -> bool {
         let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            if ch == b'<' {
-                if self.pos > start {
-                    self.set_token(TokenType::DataText, start, self.pos - start);
-                    return true;
-                } else {
-                    self.advance();
-                    self.state_fn = Self::state_tag_open;
-                    return self.next();
-                }
+        
+        if let Some(lt_pos) = self.find_byte(b'<', self.pos) {
+            if lt_pos > start {
+                self.set_token(TokenType::DataText, start, lt_pos - start);
+                self.pos = lt_pos;
+                return true;
+            } else {
+                self.pos = lt_pos + 1;
+                self.state_fn = Self::state_tag_open;
+                return self.next();
             }
-            self.advance();
-        }
-
-        if self.pos > start {
-            self.set_token(TokenType::DataText, start, self.pos - start);
-            true
         } else {
-            false
+            if self.len > start {
+                self.set_token(TokenType::DataText, start, self.len - start);
+                self.pos = self.len;
+                self.state_fn = Self::state_eof;
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
@@ -168,6 +243,7 @@ impl<'a> Html5State<'a> {
             }
             b'/' => {
                 self.advance();
+                self.is_close = true;
                 self.state_fn = Self::state_end_tag_open;
                 self.next()
             }
@@ -176,13 +252,30 @@ impl<'a> Html5State<'a> {
                 self.state_fn = Self::state_bogus_comment;
                 self.next()
             }
+            b'%' => {
+                // IE <= 9 and Safari < 4.0.3 alternative comment format
+                self.advance();
+                self.state_fn = Self::state_bogus_comment2;
+                self.next()
+            }
             ch if ch.is_ascii_alphabetic() => {
                 self.state_fn = Self::state_tag_name;
                 self.next()
             }
-            _ => {
-                self.state_fn = Self::state_data;
+            0 => {
+                // IE-ism: NULL characters are ignored
+                self.state_fn = Self::state_tag_name;
                 self.next()
+            }
+            _ => {
+                // Invalid character after '<', return '<' as DATA_TEXT and continue from current pos
+                if self.pos == 0 {
+                    self.state_fn = Self::state_data;
+                    return self.next();
+                }
+                self.set_token(TokenType::DataText, self.pos - 1, 1); // The '<' character
+                self.state_fn = Self::state_data;
+                true
             }
         }
     }
@@ -191,30 +284,34 @@ impl<'a> Html5State<'a> {
         let start = self.pos;
         while let Some(ch) = self.current_char() {
             match ch {
-                b'/' => {
-                    if self.pos > start {
-                        self.set_token(TokenType::TagNameOpen, start, self.pos - start);
-                        self.state_fn = Self::state_self_closing_start_tag;
-                        return true;
-                    }
-                    break;
-                }
-                b'>' => {
-                    if self.pos > start {
-                        self.set_token(TokenType::TagNameOpen, start, self.pos - start);
-                        self.advance();
-                        self.state_fn = Self::state_data;
-                        return true;
-                    }
-                    break;
+                0 => {
+                    // Special non-standard case: allow nulls in tag name
+                    // Some old browsers apparently allow and ignore them
+                    self.advance();
                 }
                 ch if Self::is_whitespace(ch) => {
-                    if self.pos > start {
-                        self.set_token(TokenType::TagNameOpen, start, self.pos - start);
-                        self.state_fn = Self::state_before_attribute_name;
-                        return true;
+                    self.set_token(TokenType::TagNameOpen, start, self.pos - start);
+                    self.advance();
+                    self.state_fn = Self::state_before_attribute_name;
+                    return true;
+                }
+                b'/' => {
+                    self.set_token(TokenType::TagNameOpen, start, self.pos - start);
+                    self.advance();
+                    self.state_fn = Self::state_self_closing_start_tag;
+                    return true;
+                }
+                b'>' => {
+                    self.set_token(TokenType::TagNameOpen, start, self.pos - start);
+                    if self.is_close {
+                        self.advance();
+                        self.is_close = false;
+                        self.token_type = TokenType::TagClose;
+                        self.state_fn = Self::state_data;
+                    } else {
+                        self.state_fn = Self::state_emit_tag_close_char;
                     }
-                    break;
+                    return true;
                 }
                 _ => {
                     self.advance();
@@ -222,13 +319,9 @@ impl<'a> Html5State<'a> {
             }
         }
 
-        if self.pos > start {
-            self.set_token(TokenType::TagNameOpen, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
-        } else {
-            false
-        }
+        self.set_token(TokenType::TagNameOpen, start, self.len - start);
+        self.state_fn = Self::state_eof;
+        true
     }
 
     fn state_end_tag_open(&mut self) -> bool {
@@ -236,12 +329,20 @@ impl<'a> Html5State<'a> {
             return false;
         }
 
-        if self.current_char().unwrap().is_ascii_alphabetic() {
-            self.state_fn = Self::state_tag_name_close;
-            self.next()
-        } else {
-            self.state_fn = Self::state_bogus_comment;
-            self.next()
+        match self.current_char().unwrap() {
+            b'>' => {
+                self.state_fn = Self::state_data;
+                self.next()
+            }
+            ch if ch.is_ascii_alphabetic() => {
+                self.state_fn = Self::state_tag_name;
+                self.next()
+            }
+            _ => {
+                self.is_close = false;
+                self.state_fn = Self::state_bogus_comment;
+                self.next()
+            }
         }
     }
 
@@ -251,7 +352,7 @@ impl<'a> Html5State<'a> {
             match ch {
                 b'>' => {
                     if self.pos > start {
-                        self.set_token(TokenType::TagNameClose, start, self.pos - start);
+                        self.set_token(TokenType::TagClose, start, self.pos - start);
                         self.advance();
                         self.state_fn = Self::state_data;
                         return true;
@@ -260,7 +361,7 @@ impl<'a> Html5State<'a> {
                 }
                 ch if Self::is_whitespace(ch) => {
                     if self.pos > start {
-                        self.set_token(TokenType::TagNameClose, start, self.pos - start);
+                        self.set_token(TokenType::TagClose, start, self.pos - start);
                         self.skip_whitespace();
                         if self.current_char() == Some(b'>') {
                             self.advance();
@@ -279,7 +380,7 @@ impl<'a> Html5State<'a> {
         }
 
         if self.pos > start {
-            self.set_token(TokenType::TagNameClose, start, self.pos - start);
+            self.set_token(TokenType::TagClose, start, self.pos - start);
             self.state_fn = Self::state_eof;
             true
         } else {
@@ -287,12 +388,30 @@ impl<'a> Html5State<'a> {
         }
     }
 
+    fn state_emit_tag_close_char(&mut self) -> bool {
+        self.set_token(TokenType::TagNameClose, self.pos, 1);
+        self.advance();
+        if self.pos < self.len {
+            self.state_fn = Self::state_data;
+        } else {
+            self.state_fn = Self::state_eof;
+        }
+        true
+    }
+
     fn state_self_closing_start_tag(&mut self) -> bool {
-        self.skip_whitespace();
+        if self.is_eof() {
+            return false;
+        }
+        
         if self.current_char() == Some(b'>') {
+            // Create the TAG_NAME_SELFCLOSE token pointing to the '/' character
+            // with length 2 to include both '/' and '>'
+            assert!(self.pos > 0);
+            self.set_token(TokenType::TagNameSelfclose, self.pos - 1, 2);
             self.advance();
             self.state_fn = Self::state_data;
-            self.next()
+            return true;
         } else {
             self.state_fn = Self::state_before_attribute_name;
             self.next()
@@ -300,103 +419,84 @@ impl<'a> Html5State<'a> {
     }
 
     fn state_before_attribute_name(&mut self) -> bool {
-        self.skip_whitespace();
-
-        if self.is_eof() {
-            return false;
-        }
-
-        match self.current_char().unwrap() {
-            b'/' => {
-                self.advance();
-                self.state_fn = Self::state_self_closing_start_tag;
-                self.next()
-            }
-            b'>' => {
-                self.advance();
-                self.state_fn = Self::state_data;
-                self.next()
-            }
-            b'=' => {
-                self.advance();
-                self.state_fn = Self::state_before_attribute_name;
-                self.next()
-            }
-            _ => {
-                self.state_fn = Self::state_attribute_name;
-                self.next()
+        // Manual tail call optimization loop
+        loop {
+            match self.skip_whitespace() {
+                None => return false, // EOF
+                Some(b'/') => {
+                    self.advance();
+                    // Tail call optimization: if next char is not '>', loop instead of recursing
+                    if self.pos < self.len && self.s[self.pos] != b'>' {
+                        continue;
+                    }
+                    return self.state_self_closing_start_tag();
+                }
+                Some(b'>') => {
+                    self.set_token(TokenType::TagNameClose, self.pos, 1);
+                    self.advance();
+                    self.state_fn = Self::state_data;
+                    return true;
+                }
+                Some(_) => {
+                    self.state_fn = Self::state_attribute_name;
+                    return self.next();
+                }
             }
         }
     }
 
     fn state_attribute_name(&mut self) -> bool {
         let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            match ch {
-                b'/' | b'>' => {
-                    if self.pos > start {
-                        self.set_token(TokenType::AttrName, start, self.pos - start);
-                        self.state_fn = Self::state_after_attribute_name;
-                        return true;
-                    }
-                    break;
-                }
-                b'=' => {
-                    if self.pos > start {
-                        self.set_token(TokenType::AttrName, start, self.pos - start);
-                        self.advance();
-                        self.state_fn = Self::state_before_attribute_value;
-                        return true;
-                    }
-                    break;
-                }
-                ch if Self::is_whitespace(ch) => {
-                    if self.pos > start {
-                        self.set_token(TokenType::AttrName, start, self.pos - start);
-                        self.state_fn = Self::state_after_attribute_name;
-                        return true;
-                    }
-                    break;
-                }
-                _ => {
-                    self.advance();
-                }
+        // Match C implementation: start scanning from pos + 1
+        self.advance();
+        
+        while self.pos < self.len {
+            let ch = self.s[self.pos];
+            if Self::is_whitespace(ch) {
+                self.set_token(TokenType::AttrName, start, self.pos - start);
+                self.advance();
+                self.state_fn = Self::state_after_attribute_name;
+                return true;
+            } else if ch == b'/' {
+                self.set_token(TokenType::AttrName, start, self.pos - start);
+                self.advance();
+                self.state_fn = Self::state_self_closing_start_tag;
+                return true;
+            } else if ch == b'=' {
+                self.set_token(TokenType::AttrName, start, self.pos - start);
+                self.advance();
+                self.state_fn = Self::state_before_attribute_value;
+                return true;
+            } else if ch == b'>' {
+                self.set_token(TokenType::AttrName, start, self.pos - start);
+                self.state_fn = Self::state_emit_tag_close_char;
+                return true;
+            } else {
+                self.pos += 1;
             }
         }
-
-        if self.pos > start {
-            self.set_token(TokenType::AttrName, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
-        } else {
-            false
-        }
+        
+        // EOF
+        self.set_token(TokenType::AttrName, start, self.len - start);
+        self.state_fn = Self::state_eof;
+        true
     }
 
     fn state_after_attribute_name(&mut self) -> bool {
-        self.skip_whitespace();
-
-        if self.is_eof() {
-            return false;
-        }
-
-        match self.current_char().unwrap() {
-            b'/' => {
+        match self.skip_whitespace() {
+            None => false, // EOF
+            Some(b'/') => {
                 self.advance();
-                self.state_fn = Self::state_self_closing_start_tag;
-                self.next()
+                self.state_self_closing_start_tag()
             }
-            b'>' => {
+            Some(b'=') => {
                 self.advance();
-                self.state_fn = Self::state_data;
-                self.next()
+                self.state_before_attribute_value()
             }
-            b'=' => {
-                self.advance();
-                self.state_fn = Self::state_before_attribute_value;
-                self.next()
+            Some(b'>') => {
+                self.state_emit_tag_close_char()
             }
-            _ => {
+            Some(_) => {
                 self.state_fn = Self::state_attribute_name;
                 self.next()
             }
@@ -404,161 +504,117 @@ impl<'a> Html5State<'a> {
     }
 
     fn state_before_attribute_value(&mut self) -> bool {
-        self.skip_whitespace();
-
-        if self.is_eof() {
-            return false;
-        }
-
-        match self.current_char().unwrap() {
-            b'"' => {
-                self.advance();
-                self.state_fn = Self::state_attribute_value_double_quote;
-                self.next()
+        match self.skip_whitespace() {
+            None => {
+                self.state_fn = Self::state_eof;
+                false
             }
-            b'\'' => {
-                self.advance();
-                self.state_fn = Self::state_attribute_value_single_quote;
-                self.next()
-            }
-            b'`' => {
-                self.advance();
-                self.state_fn = Self::state_attribute_value_back_quote;
-                self.next()
-            }
-            b'>' => {
-                self.advance();
-                self.state_fn = Self::state_data;
-                self.next()
-            }
-            _ => {
-                self.state_fn = Self::state_attribute_value_no_quote;
-                self.next()
-            }
+            Some(b'"') => self.state_attribute_value_double_quote(),
+            Some(b'\'') => self.state_attribute_value_single_quote(),
+            Some(b'`') => self.state_attribute_value_back_quote(),
+            Some(_) => self.state_attribute_value_no_quote()
         }
     }
 
     fn state_attribute_value_double_quote(&mut self) -> bool {
-        let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            if ch == b'"' {
-                self.set_token(TokenType::AttrValue, start, self.pos - start);
-                self.advance();
-                self.state_fn = Self::state_after_attribute_value_quoted;
-                return true;
-            }
+        // Skip initial quote in normal case, but not if pos == 0 (non-data state start)
+        if self.pos > 0 {
             self.advance();
         }
-
-        if self.pos > start {
-            self.set_token(TokenType::AttrValue, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
+        
+        let start = self.pos;
+        if let Some(quote_pos) = self.find_byte(b'"', self.pos) {
+            self.set_token(TokenType::AttrValue, start, quote_pos - start);
+            self.pos = quote_pos + 1;
+            self.state_fn = Self::state_after_attribute_value_quoted;
         } else {
-            false
+            self.set_token(TokenType::AttrValue, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
         }
+        true
     }
 
     fn state_attribute_value_single_quote(&mut self) -> bool {
-        let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            if ch == b'\'' {
-                self.set_token(TokenType::AttrValue, start, self.pos - start);
-                self.advance();
-                self.state_fn = Self::state_after_attribute_value_quoted;
-                return true;
-            }
+        // Skip initial quote in normal case, but not if pos == 0 (non-data state start)
+        if self.pos > 0 {
             self.advance();
         }
-
-        if self.pos > start {
-            self.set_token(TokenType::AttrValue, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
+        
+        let start = self.pos;
+        if let Some(quote_pos) = self.find_byte(b'\'', self.pos) {
+            self.set_token(TokenType::AttrValue, start, quote_pos - start);
+            self.pos = quote_pos + 1;
+            self.state_fn = Self::state_after_attribute_value_quoted;
         } else {
-            false
+            self.set_token(TokenType::AttrValue, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
         }
+        true
     }
 
     fn state_attribute_value_back_quote(&mut self) -> bool {
-        let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            if ch == b'`' {
-                self.set_token(TokenType::AttrValue, start, self.pos - start);
-                self.advance();
-                self.state_fn = Self::state_after_attribute_value_quoted;
-                return true;
-            }
+        // Skip initial quote in normal case, but not if pos == 0 (non-data state start)
+        if self.pos > 0 {
             self.advance();
         }
-
-        if self.pos > start {
-            self.set_token(TokenType::AttrValue, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
+        
+        let start = self.pos;
+        if let Some(quote_pos) = self.find_byte(b'`', self.pos) {
+            self.set_token(TokenType::AttrValue, start, quote_pos - start);
+            self.pos = quote_pos + 1;
+            self.state_fn = Self::state_after_attribute_value_quoted;
         } else {
-            false
+            self.set_token(TokenType::AttrValue, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
         }
+        true
     }
 
     fn state_attribute_value_no_quote(&mut self) -> bool {
         let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            match ch {
-                ch if Self::is_whitespace(ch) => {
-                    if self.pos > start {
-                        self.set_token(TokenType::AttrValue, start, self.pos - start);
-                        self.state_fn = Self::state_before_attribute_name;
-                        return true;
-                    }
-                    break;
-                }
-                b'>' => {
-                    if self.pos > start {
-                        self.set_token(TokenType::AttrValue, start, self.pos - start);
-                        self.advance();
-                        self.state_fn = Self::state_data;
-                        return true;
-                    }
-                    break;
-                }
-                _ => {
-                    self.advance();
-                }
+        while self.pos < self.len {
+            let ch = self.s[self.pos];
+            if Self::is_whitespace(ch) {
+                self.set_token(TokenType::AttrValue, start, self.pos - start);
+                self.advance();
+                self.state_fn = Self::state_before_attribute_name;
+                return true;
+            } else if ch == b'>' {
+                self.set_token(TokenType::AttrValue, start, self.pos - start);
+                self.state_fn = Self::state_emit_tag_close_char;
+                return true;
             }
+            self.pos += 1;
         }
-
-        if self.pos > start {
-            self.set_token(TokenType::AttrValue, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
-        } else {
-            false
-        }
+        
+        // EOF
+        self.set_token(TokenType::AttrValue, start, self.len - start);
+        self.state_fn = Self::state_eof;
+        true
     }
 
     fn state_after_attribute_value_quoted(&mut self) -> bool {
-        self.skip_whitespace();
-
         if self.is_eof() {
             return false;
         }
-
-        match self.current_char().unwrap() {
-            b'/' => {
-                self.advance();
-                self.state_fn = Self::state_self_closing_start_tag;
-                self.next()
-            }
-            b'>' => {
-                self.advance();
-                self.state_fn = Self::state_data;
-                self.next()
-            }
-            _ => {
-                self.state_fn = Self::state_before_attribute_name;
-                self.next()
-            }
+        
+        let ch = self.current_char().unwrap();
+        if Self::is_whitespace(ch) {
+            self.advance();
+            self.state_before_attribute_name()
+        } else if ch == b'/' {
+            self.advance();
+            self.state_self_closing_start_tag()
+        } else if ch == b'>' {
+            self.set_token(TokenType::TagNameClose, self.pos, 1);
+            self.advance();
+            self.state_fn = Self::state_data;
+            true
+        } else {
+            self.state_before_attribute_name()
         }
     }
 
@@ -570,9 +626,8 @@ impl<'a> Html5State<'a> {
         } else if self.pos + 7 <= self.len {
             let slice = &self.s[self.pos..self.pos + 7];
             if slice.eq_ignore_ascii_case(b"DOCTYPE") {
-                self.pos += 7;
                 self.state_fn = Self::state_doctype;
-                self.next()
+                return self.next();
             } else if slice.eq_ignore_ascii_case(b"[CDATA[") {
                 self.pos += 7;
                 self.state_fn = Self::state_cdata;
@@ -588,92 +643,96 @@ impl<'a> Html5State<'a> {
     }
 
     fn state_doctype(&mut self) -> bool {
+        // Set token start to include "DOCTYPE"
         let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            if ch == b'>' {
-                self.set_token(TokenType::Doctype, start, self.pos - start);
-                self.advance();
-                self.state_fn = Self::state_data;
+        
+        if let Some(gt_pos) = self.find_byte(b'>', self.pos) {
+            self.set_token(TokenType::Doctype, start, gt_pos - start);
+            self.pos = gt_pos + 1;
+            self.state_fn = Self::state_data;
+        } else {
+            self.set_token(TokenType::Doctype, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
+        }
+        true
+    }
+
+    fn state_bogus_comment2(&mut self) -> bool {
+        let start = self.pos;
+        let mut pos = self.pos;
+        
+        loop {
+            if let Some(percent_pos) = self.find_byte(b'%', pos) {
+                if percent_pos + 1 >= self.len {
+                    // No '>' after '%', consume to EOF
+                    self.set_token(TokenType::TagComment, start, self.len - start);
+                    self.pos = self.len;
+                    self.state_fn = Self::state_eof;
+                    return true;
+                }
+                
+                if self.s[percent_pos + 1] == b'>' {
+                    // Found "%>"
+                    self.set_token(TokenType::TagComment, start, percent_pos - start);
+                    self.pos = percent_pos + 2; // Skip "%>"
+                    self.state_fn = Self::state_data;
+                    return true;
+                }
+                
+                pos = percent_pos + 1;
+            } else {
+                // No more '%' found, consume to EOF
+                self.set_token(TokenType::TagComment, start, self.len - start);
+                self.pos = self.len;
+                self.state_fn = Self::state_eof;
                 return true;
             }
-            self.advance();
         }
-
-        self.set_token(TokenType::Doctype, start, self.pos - start);
-        self.state_fn = Self::state_eof;
-        true
     }
 
     fn state_comment(&mut self) -> bool {
         let start = self.pos;
-        while self.pos + 2 < self.len {
-            if self.s[self.pos] == b'-' && self.s[self.pos + 1] == b'-' && self.s[self.pos + 2] == b'>' {
-                self.set_token(TokenType::TagComment, start, self.pos - start);
-                self.pos += 3;
-                self.state_fn = Self::state_data;
-                return true;
-            }
-            self.advance();
-        }
-
-        // Handle end of input within comment
-        while let Some(_) = self.current_char() {
-            self.advance();
-        }
-
-        if self.pos > start {
-            self.set_token(TokenType::TagComment, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
+        
+        if let Some((end_pos, offset)) = self.find_comment_end(self.pos) {
+            self.set_token(TokenType::TagComment, start, end_pos - start);
+            self.pos = end_pos + offset;
+            self.state_fn = Self::state_data;
         } else {
-            false
+            self.set_token(TokenType::TagComment, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
         }
+        true
     }
 
     fn state_bogus_comment(&mut self) -> bool {
         let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            if ch == b'>' {
-                self.set_token(TokenType::TagComment, start, self.pos - start);
-                self.advance();
-                self.state_fn = Self::state_data;
-                return true;
-            }
-            self.advance();
-        }
-
-        if self.pos > start {
-            self.set_token(TokenType::TagComment, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
+        
+        if let Some(gt_pos) = self.find_byte(b'>', self.pos) {
+            self.set_token(TokenType::TagComment, start, gt_pos - start);
+            self.pos = gt_pos + 1;
+            self.state_fn = Self::state_data;
         } else {
-            false
+            self.set_token(TokenType::TagComment, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
         }
+        true
     }
 
     fn state_cdata(&mut self) -> bool {
         let start = self.pos;
-        while self.pos + 2 < self.len {
-            if self.s[self.pos] == b']' && self.s[self.pos + 1] == b']' && self.s[self.pos + 2] == b'>' {
-                self.set_token(TokenType::DataText, start, self.pos - start);
-                self.pos += 3;
-                self.state_fn = Self::state_data;
-                return true;
-            }
-            self.advance();
-        }
-
-        // Handle end of input within CDATA
-        while let Some(_) = self.current_char() {
-            self.advance();
-        }
-
-        if self.pos > start {
-            self.set_token(TokenType::DataText, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
+        
+        if let Some(end_pos) = self.find_cdata_end(self.pos) {
+            self.set_token(TokenType::DataText, start, end_pos - start);
+            self.pos = end_pos + 3; // Skip "]]>"
+            self.state_fn = Self::state_data;
         } else {
-            false
+            self.set_token(TokenType::DataText, start, self.len - start);
+            self.pos = self.len;
+            self.state_fn = Self::state_eof;
         }
+        true
     }
 }

@@ -2,6 +2,20 @@ use std::fs;
 use std::path::Path;
 use crate::xss::{Html5State, Html5Flags};
 
+/// Right-trim whitespace from string, matching C testdriver behavior
+fn rtrim(s: &str) -> String {
+    let mut result = s.to_string();
+    while !result.is_empty() {
+        let last_char = result.chars().last().unwrap();
+        if matches!(last_char, ' ' | '\n' | '\t' | '\r') {
+            result.pop();
+        } else {
+            break;
+        }
+    }
+    result
+}
+
 #[derive(Debug)]
 struct TestCase {
     name: String,
@@ -64,7 +78,8 @@ fn parse_test_file(content: &str) -> Option<TestCase> {
 }
 
 fn format_html5_token(state: &Html5State) -> String {
-    let token_data = std::str::from_utf8(state.token_start).unwrap_or("<invalid utf8>");
+    let token_bytes = &state.token_start[..state.token_len];
+    let token_data = std::str::from_utf8(token_bytes).unwrap_or("<invalid utf8>");
     format!("{},{},{}", state.token_type, state.token_len, token_data)
 }
 
@@ -88,11 +103,15 @@ fn run_single_html5_test(file_path: &Path) -> Result<(), String> {
         .ok_or_else(|| format!("Failed to parse test file {:?}", file_path))?;
 
     let actual = run_html5_tokenization(&test_case.input);
+    
+    // Apply rtrim to both expected and actual, matching C test framework behavior
+    let expected_trimmed = rtrim(&test_case.expected);
+    let actual_trimmed = rtrim(&actual);
 
-    if actual != test_case.expected {
+    if actual_trimmed != expected_trimmed {
         return Err(format!(
             "Test failed for {:?}\nTest: {}\nInput: {:?}\nExpected: {:?}\nActual: {:?}",
-            file_path, test_case.name, test_case.input, test_case.expected, actual
+            file_path, test_case.name, test_case.input, expected_trimmed, actual_trimmed
         ));
     }
 
