@@ -205,13 +205,113 @@ impl TokenizerDebugger {
     }
     
     fn analyze_c_tokenization(&self, input: &[u8]) -> Result<CResults, Box<dyn std::error::Error>> {
-        // TODO: This would call into our C harness
-        // For now, return placeholder
+        use std::process::Command;
+        use std::ffi::OsStr;
+        
+        // Call the C debug harness
+        let harness_path = "./c_harness/debug_harness";
+        let input_str = String::from_utf8_lossy(input);
+        
+        let output = Command::new(harness_path)
+            .arg(input_str.as_ref())
+            .output()?;
+            
+        if !output.status.success() {
+            return Err(format!("C harness failed: {}", String::from_utf8_lossy(&output.stderr)).into());
+        }
+        
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        self.parse_c_output(&output_str)
+    }
+    
+    fn parse_c_output(&self, output: &str) -> Result<CResults, Box<dyn std::error::Error>> {
+        let mut fingerprint = String::new();
+        let mut is_sqli = false;
+        let mut tokens = Vec::new();
+        
+        for line in output.lines() {
+            if line.starts_with("FINGERPRINT: ") {
+                fingerprint = line.strip_prefix("FINGERPRINT: ").unwrap_or("").to_string();
+            } else if line.starts_with("IS_SQLI: ") {
+                let sqli_str = line.strip_prefix("IS_SQLI: ").unwrap_or("0");
+                is_sqli = sqli_str == "1";
+            } else if line.starts_with("RAW_TOKEN_") {
+                if let Some(token_info) = self.parse_c_token_line(line)? {
+                    tokens.push(token_info);
+                }
+            }
+        }
+        
         Ok(CResults {
-            fingerprint: "TODO".to_string(),
-            is_sqli: false,
-            tokens: Vec::new(),
+            fingerprint,
+            is_sqli,
+            tokens,
         })
+    }
+    
+    fn parse_c_token_line(&self, line: &str) -> Result<Option<TokenInfo>, Box<dyn std::error::Error>> {
+        // Parse lines like: RAW_TOKEN_0: NUMBER '0' 0 1
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            return Ok(None);
+        }
+        
+        // Extract token index from RAW_TOKEN_N:
+        let index_str = parts[0].strip_prefix("RAW_TOKEN_").and_then(|s| s.strip_suffix(":"));
+        let index = if let Some(idx_str) = index_str {
+            idx_str.parse().unwrap_or(0)
+        } else {
+            0
+        };
+        
+        let token_type = parts[1].to_string();
+        
+        // Extract value from single quotes
+        let mut value = String::new();
+        let mut in_quotes = false;
+        let mut quote_start = 0;
+        for (i, part) in parts.iter().enumerate().skip(2) {
+            if part.starts_with("'") {
+                in_quotes = true;
+                quote_start = i;
+                value = part.strip_prefix("'").unwrap_or(part).to_string();
+                if part.ends_with("'") && part.len() > 1 {
+                    value = value.strip_suffix("'").unwrap_or(&value).to_string();
+                    break;
+                }
+            } else if in_quotes {
+                if part.ends_with("'") {
+                    value.push(' ');
+                    value.push_str(part.strip_suffix("'").unwrap_or(part));
+                    break;
+                } else {
+                    value.push(' ');
+                    value.push_str(part);
+                }
+            }
+        }
+        
+        // Get position and length (last two numeric parts)
+        let numeric_parts: Vec<usize> = parts.iter()
+            .skip(quote_start + 1)
+            .filter_map(|s| s.parse().ok())
+            .collect();
+            
+        let (position, length) = if numeric_parts.len() >= 2 {
+            (numeric_parts[numeric_parts.len() - 2], numeric_parts[numeric_parts.len() - 1])
+        } else {
+            (0, 0)
+        };
+        
+        Ok(Some(TokenInfo {
+            index,
+            token_type,
+            value,
+            position,
+            length,
+            str_open: None,
+            str_close: None,
+        }))
     }
     
     fn parse_flags(&self, flags_str: &str) -> Result<SqliFlags, Box<dyn std::error::Error>> {
