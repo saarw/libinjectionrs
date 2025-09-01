@@ -2,6 +2,30 @@ use crate::sqli::*;
 use std::fs;
 use std::path::Path;
 
+/// Format token value like C's testdriver - reconstructs variable prefixes and string quotes
+fn format_token_for_c_compatibility(token: &Token) -> String {
+    match token.token_type {
+        TokenType::Variable => {
+            // Reconstruct @ symbols like C's print_var function
+            let at_symbols = "@".repeat(token.count as usize);
+            format!("{}{}", at_symbols, token.value_as_str())
+        }
+        TokenType::String => {
+            // Reconstruct string quotes like C's print_string function
+            let mut result = String::new();
+            if token.str_open != 0 {
+                result.push(token.str_open as char);
+            }
+            result.push_str(token.value_as_str());
+            if token.str_close != 0 {
+                result.push(token.str_close as char);
+            }
+            result
+        }
+        _ => token.value_as_str().to_string()
+    }
+}
+
 /// Test all folding test cases from the C library
 #[test]
 fn test_folding_from_c_testdata() {
@@ -43,6 +67,8 @@ fn test_folding_from_c_testdata() {
                 // Show the actual vs expected for debugging
                 let mut state = SqliState::new(input.as_bytes(), SqliFlags::FLAG_NONE);
                 let token_count = state.fold_tokens();
+                let expected_lines: Vec<&str> = expected.lines().collect();
+                
                 println!("  Input: {}", input);
                 println!("  Expected tokens:");
                 for line in expected.lines() {
@@ -53,7 +79,21 @@ fn test_folding_from_c_testdata() {
                     if i >= token_count {
                         break;
                     }
-                    println!("    {} {}", token.token_type.to_char(), token.value_as_str());
+                    // Display the actual value being compared, not the C-compatible formatted version
+                    // For tokens at index i, we need to show what would actually be compared
+                    if i < expected_lines.len() {
+                        let expected_line = expected_lines[i];
+                        let parts: Vec<&str> = expected_line.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            let expected_value = parts[1..].join(" ");
+                            let actual_value = format_token_for_c_compatibility(token);
+                            println!("    {} {} (comparing with: {})", token.token_type.to_char(), actual_value, expected_value);
+                        } else {
+                            println!("    {} {}", token.token_type.to_char(), format_token_for_c_compatibility(token));
+                        }
+                    } else {
+                        println!("    {} {}", token.token_type.to_char(), format_token_for_c_compatibility(token));
+                    }
                 }
                 println!();
             }
@@ -123,6 +163,7 @@ fn run_folding_test(input: &str, expected: &str) -> bool {
     
     let expected_lines: Vec<&str> = expected.lines().collect();
     
+    
     if token_count != expected_lines.len() {
         return false;
     }
@@ -140,19 +181,14 @@ fn run_folding_test(input: &str, expected: &str) -> bool {
         }
         
         let expected_type_char = parts[0].chars().next().unwrap();
-        let mut expected_value = parts[1..].join(" ");
+        let expected_value = parts[1..].join(" ");
         
-        // Strip quotes from expected value for string tokens
-        if expected_type_char == 's' && expected_value.len() >= 2 {
-            let chars: Vec<char> = expected_value.chars().collect();
-            if (chars[0] == '"' && chars[chars.len()-1] == '"') ||
-               (chars[0] == '\'' && chars[chars.len()-1] == '\'') {
-                expected_value = expected_value[1..expected_value.len()-1].to_string();
-            }
-        }
+        // Don't strip quotes from expected value for string tokens
+        // The format_token_for_c_compatibility function reconstructs the quotes
+        // so we need to compare with quotes included
         
         let actual_type_char = token.token_type.to_char();
-        let actual_value = token.value_as_str();
+        let actual_value = format_token_for_c_compatibility(token);
         
         if actual_type_char != expected_type_char || actual_value != expected_value {
             return false;

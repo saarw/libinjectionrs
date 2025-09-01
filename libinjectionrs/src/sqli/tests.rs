@@ -4,6 +4,30 @@
 mod tests {
     use crate::sqli::*;
     
+    /// Format token value like C's testdriver - reconstructs variable prefixes and string quotes
+    fn format_token_for_c_compatibility(token: &Token) -> String {
+        match token.token_type {
+            TokenType::Variable => {
+                // Reconstruct @ symbols like C's print_var function
+                let at_symbols = "@".repeat(token.count as usize);
+                format!("{}{}", at_symbols, token.value_as_str())
+            }
+            TokenType::String => {
+                // Reconstruct string quotes like C's print_string function
+                let mut result = String::new();
+                if token.str_open != 0 {
+                    result.push(token.str_open as char);
+                }
+                result.push_str(token.value_as_str());
+                if token.str_close != 0 {
+                    result.push(token.str_close as char);
+                }
+                result
+            }
+            _ => token.value_as_str().to_string()
+        }
+    }
+    
     #[test]
     fn test_basic_detection() {
         // Placeholder test - create basic state for testing
@@ -72,17 +96,35 @@ mod tests {
     #[test]
     fn test_select_float_version() {
         let input = "SELECT float @@version;";
-        let mut state = SqliState::from_string(input, SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0));
         
+        println!("=== Rust Detailed Debug ===");
         println!("Input: {}", input);
         
-        let fingerprint = state.get_fingerprint();
-        println!("Rust fingerprint: {}", fingerprint);
+        // Show raw tokenization first
+        println!("\n--- Raw tokenization ---");
+        let input_bytes = input.as_bytes();
+        let flags = SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0);
+        let mut tokenizer = SqliTokenizer::new(input_bytes, flags);
         
+        let mut raw_tokens = Vec::new();
+        while let Some(token) = tokenizer.next_token() {
+            println!("Raw Token {}: type={:?}, val='{}' (pos: {}, len: {})", 
+                     raw_tokens.len(), token.token_type, format_token_for_c_compatibility(&token), token.pos, token.len);
+            raw_tokens.push(token);
+            if raw_tokens.len() >= 8 {
+                break;
+            }
+        }
+        
+        println!("\n--- After folding ---");
+        let mut state = SqliState::from_string(input, SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+        let fingerprint = state.get_fingerprint();
+        
+        println!("Rust fingerprint: {}", fingerprint);
         println!("Final tokens ({} total):", state.tokens.len());
         for (i, token) in state.tokens.iter().enumerate() {
-            println!("  Token {}: type={:?}, val={:?} (pos: {}, len: {})", 
-                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+            println!("  Folded Token {}: type={:?}, val={:?} (pos: {}, len: {})", 
+                     i, token.token_type, format_token_for_c_compatibility(token), token.pos, token.len);
         }
         
         // According to test-folding-053.txt, expected tokens should be:
