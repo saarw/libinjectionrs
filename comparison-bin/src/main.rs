@@ -141,7 +141,7 @@ fn compare_sqli_single(input: &str, flags: i32) -> Result<SqliComparison> {
     let c_result = call_c_sqli(input, flags)?;
     
     let rust_sqli_result = RustSqliResult {
-        is_injection: rust_result.is_injection,
+        is_injection: rust_result.is_injection(),
         fingerprint: rust_result.fingerprint.map(|f| f.to_string()),
     };
     

@@ -144,7 +144,7 @@ pub fn run_full_differential_tests() -> DifferentialTestResult {
                 let result = match category.detector_type {
                     DetectorType::Sqli => {
                         let detection = detect_sqli(decoded_line.as_bytes());
-                        detection.is_injection
+                        detection.is_injection()
                     }
                     DetectorType::Xss => {
                         let detection = detect_xss(decoded_line.as_bytes());
@@ -335,7 +335,7 @@ mod tests {
         for (input, expected_injection) in test_cases {
             let result = detect_sqli(input.as_bytes());
             println!("Testing '{}': injection={}, expected={}", 
-                     input, result.is_injection, expected_injection);
+                     input, result.is_injection(), expected_injection);
             
             // Note: This might not always match expectations due to implementation differences
             // The test is mainly to verify the function doesn't panic

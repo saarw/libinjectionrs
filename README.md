@@ -22,14 +22,14 @@ use libinjectionrs::{detect_sqli, detect_xss};
 let input = b"1' OR '1'='1";
 let result = detect_sqli(input);
 if result.is_injection() {
-    println!("SQL injection detected: {}", result.fingerprint().unwrap());
+    println!("SQL injection detected: {:?}", result.fingerprint);
 }
 
 // XSS detection
 let input = b"<script>alert('xss')</script>";
 let result = detect_xss(input);
 if result.is_injection() {
-    println!("XSS detected in {} context", result.context().unwrap());
+    println!("XSS detected");
 }
 ```
 

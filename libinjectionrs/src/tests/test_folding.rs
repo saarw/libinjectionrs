@@ -12,9 +12,10 @@ use std::path::Path;
 fn format_token_for_c_compatibility(token: &Token) -> String {
     match token.token_type {
         TokenType::Variable => {
-            // Reconstruct @ symbols like C's print_var function
-            let at_symbols = "@".repeat(token.count as usize);
-            format!("{}{}", at_symbols, token.value_as_str())
+            // Rust tokenizer already includes @ symbols in the token value, unlike C
+            // C stores variable name without @ and adds them in print_var based on count
+            // Rust stores the full @variable string, so just return it as-is
+            token.value_as_str().to_string()
         }
         TokenType::String => {
             // Reconstruct string quotes like C's print_string function

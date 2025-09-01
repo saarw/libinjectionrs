@@ -40,9 +40,15 @@ impl fmt::Display for InjectionType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DetectionResult {
     pub injection_type: InjectionType,
-    pub is_injection: bool,
+    is_injection: bool,
     pub fingerprint: Option<Fingerprint>,
     pub confidence: f32,
+}
+
+impl DetectionResult {
+    pub fn is_injection(&self) -> bool {
+        self.is_injection
+    }
 }
 
 // Fingerprint is now exported from sqli module
