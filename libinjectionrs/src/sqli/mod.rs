@@ -1,5 +1,8 @@
 use core::ops::Deref;
 
+#[cfg(feature = "smallvec")]
+use smallvec::SmallVec;
+
 pub const LIBINJECTION_SQLI_MAX_TOKENS: usize = 5;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -103,7 +106,13 @@ pub struct SqliState<'a> {
     flags: SqliFlags,
     
     // Token storage - we store up to MAX_TOKENS + 3 during processing
+    #[cfg(feature = "smallvec")]
+    pub tokens: SmallVec<[Token; 8]>,
+    #[cfg(not(feature = "smallvec"))]
     pub tokens: Vec<Token>,
+    #[cfg(feature = "smallvec")]
+    token_vec: SmallVec<[Token; 8]>,
+    #[cfg(not(feature = "smallvec"))]
     token_vec: Vec<Token>,
     
     // Current position in input
@@ -132,7 +141,13 @@ impl<'a> SqliState<'a> {
         SqliState {
             input,
             flags,
+            #[cfg(feature = "smallvec")]
+            tokens: SmallVec::new(),
+            #[cfg(not(feature = "smallvec"))]
             tokens: Vec::with_capacity(LIBINJECTION_SQLI_MAX_TOKENS + 3),
+            #[cfg(feature = "smallvec")]
+            token_vec: SmallVec::new(),
+            #[cfg(not(feature = "smallvec"))]
             token_vec: Vec::with_capacity(LIBINJECTION_SQLI_MAX_TOKENS + 3),
             pos: 0,
             current_token: None,

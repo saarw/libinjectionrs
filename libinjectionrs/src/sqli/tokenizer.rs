@@ -359,105 +359,34 @@ impl<'a> SqliTokenizer<'a> {
     
     // Character dispatch function - matches char_parse_map in C
     fn dispatch_char_parser(&mut self, ch: u8) -> usize {
-        match ch {
-            // Whitespace (0-32, 160, 240)
-            0..=32 | 160 | 240 => self.parse_white(),
-            // ! (33)
-            33 => self.parse_operator2(),
-            // " (34)
-            34 => self.parse_string(),
-            // # (35)
-            35 => self.parse_hash(),
-            // $ (36)
-            36 => self.parse_money(),
-            // % (37)
-            37 => self.parse_operator1(),
-            // & (38)
-            38 => self.parse_operator2(),
-            // ' (39)
-            39 => self.parse_string(),
-            // ( (40)
-            40 => self.parse_char(),
-            // ) (41)
-            41 => self.parse_char(),
-            // * (42)
-            42 => self.parse_operator2(),
-            // + (43)
-            43 => self.parse_operator1(),
-            // , (44)
-            44 => self.parse_char(),
-            // - (45)
-            45 => self.parse_dash(),
-            // . (46)
-            46 => self.parse_number(),
-            // / (47)
-            47 => self.parse_slash(),
-            // 0-9 (48-57)
-            48..=57 => self.parse_number(),
-            // : (58)
-            58 => self.parse_operator2(),
-            // ; (59)
-            59 => self.parse_char(),
-            // < (60)
-            60 => self.parse_operator2(),
-            // = (61)
-            61 => self.parse_operator2(),
-            // > (62)
-            62 => self.parse_operator2(),
-            // ? (63)
-            63 => self.parse_other(),
-            // @ (64)
-            64 => self.parse_var(),
-            // A-Z (65-90)
-            65 => self.parse_word(), // A
-            66 => self.parse_bstring(), // B
-            67..=68 => self.parse_word(), // C-D
-            69 => self.parse_estring(), // E
-            70..=77 => self.parse_word(), // F-M
-            78 => self.parse_nqstring(), // N
-            79..=80 => self.parse_word(), // O-P
-            81 => self.parse_qstring(), // Q
-            82..=84 => self.parse_word(), // R-T
-            85 => self.parse_ustring(), // U
-            86..=87 => self.parse_word(), // V-W
-            88 => self.parse_xstring(), // X
-            89..=90 => self.parse_word(), // Y-Z
-            // [ (91)
-            91 => self.parse_bword(),
-            // \ (92)
-            92 => self.parse_backslash(),
-            // ] (93)
-            93 => self.parse_other(),
-            // ^ (94)
-            94 => self.parse_operator1(),
-            // _ (95)
-            95 => self.parse_word(),
-            // ` (96)
-            96 => self.parse_tick(),
-            // a-z (97-122)
-            97 => self.parse_word(), // a
-            98 => self.parse_bstring(), // b
-            99..=100 => self.parse_word(), // c-d
-            101 => self.parse_estring(), // e
-            102..=109 => self.parse_word(), // f-m
-            110 => self.parse_nqstring(), // n
-            111..=112 => self.parse_word(), // o-p
-            113 => self.parse_qstring(), // q
-            114..=116 => self.parse_word(), // r-t
-            117 => self.parse_ustring(), // u
-            118..=119 => self.parse_word(), // v-w
-            120 => self.parse_xstring(), // x
-            121..=122 => self.parse_word(), // y-z
-            // { (123)
-            123 => self.parse_char(),
-            // | (124)
-            124 => self.parse_operator2(),
-            // } (125)
-            125 => self.parse_char(),
-            // ~ (126)
-            126 => self.parse_operator1(),
-            // Everything else
-            _ => self.parse_other(),
+        use crate::sqli::sqli_data::{get_char_type, CharType};
+        
+        // Use the generated lookup table - same as C implementation
+        match get_char_type(ch) {
+            CharType::White => self.parse_white(),
+            CharType::Bang => self.parse_operator2(),
+            CharType::String => self.parse_string(),
+            CharType::Hash => self.parse_hash(),
+            CharType::Money => self.parse_money(),
+            CharType::Op1 | CharType::Unary => self.parse_operator1(),
+            CharType::Op2 => self.parse_operator2(),
+            CharType::LeftParens | CharType::RightParens | CharType::Comma | 
+            CharType::Semicolon | CharType::LeftBrace | CharType::RightBrace => self.parse_char(),
+            CharType::Dash => self.parse_dash(),
+            CharType::Number => self.parse_number(),
+            CharType::Slash => self.parse_slash(),
+            CharType::Variable => self.parse_var(),
+            CharType::Word => self.parse_word(),     // This now handles UTF-8 bytes 128-255!
+            CharType::BString => self.parse_bstring(),
+            CharType::EString => self.parse_estring(),
+            CharType::NQString => self.parse_nqstring(),
+            CharType::QString => self.parse_qstring(),
+            CharType::UString => self.parse_ustring(),
+            CharType::XString => self.parse_xstring(),
+            CharType::BWord => self.parse_bword(),
+            CharType::Backslash => self.parse_backslash(),
+            CharType::Tick => self.parse_tick(),
+            CharType::Other => self.parse_other(),
         }
     }
     
@@ -674,12 +603,28 @@ impl<'a> SqliTokenizer<'a> {
         
         let mut ctype = TYPE_COMMENT;
         
-        // Check for nested comments or MySQL conditional comments
+        // Check for nested comments - matching C logic exactly, including the off-by-one bug
+        // C code: memchr2(cur + 2, (size_t)(ptr - (cur + 1)), '/', '*')
+        // where ptr points to the '*' in the closing '*/'
         if let Some(close_pos) = self.memchr2(search_slice, b'*', b'/') {
-            // If we found */ and there's another /* inside the comment, mark as evil
-            let comment_content = &search_slice[..close_pos];
-            if self.memchr2(comment_content, b'/', b'*').is_some() {
-                ctype = TYPE_EVIL;
+            // In C terms:
+            // - cur = pos (start of /*)
+            // - ptr = pos + 2 + close_pos (points to * in */)
+            // - Search start: cur + 2 = pos + 2 
+            // - Search length: ptr - (cur + 1) = (pos + 2 + close_pos) - (pos + 1) = close_pos + 1
+            // The bug: should be ptr - (cur + 2) = close_pos, but it's close_pos + 1
+            
+            // So we search 1 byte more than we should
+            let buggy_search_length = close_pos + 1;
+            
+            // Make sure we don't go out of bounds
+            let actual_search_length = buggy_search_length.min(search_slice.len());
+            
+            if actual_search_length > 0 {
+                let buggy_search_region = &search_slice[..actual_search_length];
+                if self.memchr2(buggy_search_region, b'/', b'*').is_some() {
+                    ctype = TYPE_EVIL;
+                }
             }
         }
         
@@ -1004,14 +949,14 @@ impl<'a> SqliTokenizer<'a> {
         
         if end_pos == new_pos {
             // Empty variable name (just @ or @@ symbols)
-            // Store empty content like C implementation
-            let var_slice = &self.input[new_pos..new_pos]; // Empty slice
-            self.current.assign(TYPE_VARIABLE, self.pos, 0, var_slice);
+            // Store the @ symbols like C implementation 
+            let var_slice = &self.input[self.pos..new_pos]; // Include @ symbols
+            self.current.assign(TYPE_VARIABLE, self.pos, new_pos - self.pos, var_slice);
             new_pos
         } else {
-            // Non-empty variable - store only the name part (without @ symbols) like C
-            let var_slice = &self.input[new_pos..end_pos];
-            self.current.assign(TYPE_VARIABLE, self.pos, end_pos - new_pos, var_slice);
+            // Non-empty variable - store the @ symbols + name like C
+            let var_slice = &self.input[self.pos..end_pos]; // Include @ symbols
+            self.current.assign(TYPE_VARIABLE, self.pos, end_pos - self.pos, var_slice);
             end_pos
         }
     }

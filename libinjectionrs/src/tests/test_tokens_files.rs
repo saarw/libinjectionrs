@@ -113,22 +113,29 @@ fn format_string_token(token: &Token) -> String {
 fn format_variable_token(token: &Token) -> String {
     let mut result = String::new();
     
-    // Add @ symbols based on count (like C testdriver)
-    for _ in 0..token.count {
-        result.push('@');
-    }
-    
-    // Add opening quote/backtick if present
+    // Check if this is a complex variable (has quotes/backticks)
     if token.str_open != 0 {
+        // Complex case: @@`version` -> count=2, value="version", str_open='`'
+        // Need to reconstruct: @@ + ` + value + `
+        
+        // Add @ symbols based on count
+        for _ in 0..token.count {
+            result.push('@');
+        }
+        
+        // Add opening quote/backtick
         result.push(token.str_open as char);
-    }
-    
-    // Add variable name
-    result.push_str(token.value_as_str());
-    
-    // Add closing quote/backtick if present  
-    if token.str_close != 0 {
-        result.push(token.str_close as char);
+        
+        // Add the content (variable name or string content)
+        result.push_str(token.value_as_str());
+        
+        // Add closing quote/backtick if present
+        if token.str_close != 0 {
+            result.push(token.str_close as char);
+        }
+    } else {
+        // Simple case: @var -> value="@var" (includes @ symbols already)
+        result.push_str(token.value_as_str());
     }
     
     result
@@ -294,4 +301,24 @@ mod tests {
         
         // Don't assert yet, just show the difference
     }
+
+    #[test]
+    fn test_utf8_fix_verification() {
+        // Verify that our UTF-8 fix works correctly
+        let input = "SELECT テスト;";
+        println!("\n=== UTF-8 Fix Verification ===");
+        println!("Testing: {}", input);
+        println!("UTF-8 bytes: {:?}", input.as_bytes());
+        
+        let expected = "E SELECT\nn テスト\n; ;";
+        let actual = run_sqli_tokenization(input);
+        
+        println!("Expected:\n{}", expected);
+        println!("Actual:\n{}", actual);
+        
+        // This should now pass with our fix
+        assert_eq!(actual, expected, "UTF-8 tokenization should match C behavior");
+    }
+
+
 }
