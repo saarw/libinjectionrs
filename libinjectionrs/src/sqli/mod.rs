@@ -286,6 +286,11 @@ impl<'a> SqliState<'a> {
     
     fn fingerprint(&mut self) -> Fingerprint {
         let token_count = self.fold_tokens();
+        
+        // Post-process tokens to detect MySQL conditional comments
+        // This matches C implementation behavior in libinjection_sqli.c lines 1942-1954
+        self.detect_mysql_comments_in_tokens(token_count);
+        
         self.generate_fingerprint(token_count);
         Fingerprint::new(self.fingerprint)
     }
@@ -984,6 +989,50 @@ impl<'a> SqliState<'a> {
          t[2].token_type == TokenType::Operator &&
          t[3].token_type == TokenType::LeftParenthesis &&
          t[4].token_type == TokenType::Bareword)
+    }
+    
+    /// Checks if a token contains MySQL conditional comment patterns (/*!)
+    /// This matches the C implementation's logic for detecting evil comment patterns
+    /// 
+    /// C code reference: libinjection_sqli.c lines 454-474 (is_mysql_comment function)
+    /// Also referenced: libinjection_sqli.c lines 513-514 (parse_slash calling is_mysql_comment)
+    fn has_mysql_conditional_comment(&self, token: &Token) -> bool {
+        if token.len < 3 {
+            return false;
+        }
+        
+        // Look for /*!  pattern in token content
+        // This matches C's is_mysql_comment function logic:
+        // C: if (cs[pos + 2] != '!') return 0;  (line 464)
+        let content = &token.val[..token.len.min(32)];
+        
+        for i in 0..content.len().saturating_sub(2) {
+            if content[i] == b'/' && content[i + 1] == b'*' && content[i + 2] == b'!' {
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// Post-process tokens to detect MySQL conditional comments in string content
+    /// This matches the C implementation's behavior where string content is scanned
+    /// for evil patterns and converted to EVIL tokens
+    /// 
+    /// C code reference: libinjection_sqli.c lines 1942-1954 (fingerprint post-processing)
+    /// The C code checks: if (strchr(sql_state->fingerprint, TYPE_EVIL))
+    /// and then sets: sql_state->fingerprint[0] = TYPE_EVIL; (line 1949)
+    fn detect_mysql_comments_in_tokens(&mut self, token_count: usize) {
+        for i in 0..token_count.min(self.tokens.len()) {
+            // Check if this is a string token containing MySQL conditional comment
+            if self.tokens[i].token_type == TokenType::String {
+                if self.has_mysql_conditional_comment(&self.tokens[i]) {
+                    // Convert to EVIL token like C does
+                    // C: sql_state->tokenvec[0].type = TYPE_EVIL; (line 1951)
+                    self.tokens[i].token_type = TokenType::Evil;
+                }
+            }
+        }
     }
     
     fn generate_fingerprint(&mut self, token_count: usize) {

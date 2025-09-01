@@ -2,7 +2,7 @@ The directory libinjection-c is a git submodule with the original libinjection r
 
 Further instructions for how C should be mapped to Rust is in docs/ARCHITECTURE.md and docs/PORTING_STRATEGY.md
 
-The root directory contains comparison-bin and ffi-harness directories for running comparisons to C behavior. The libinjection-debug directory is a tool for debugging tokenization and folding issues.
+The root directory contains comparison-bin and ffi-harness directories for running comparisons to C behavior. The tool in the libinjection-debug directory should be the first step for debugging tokenization and folding issues.
 
 Whenever we explore a failing test, DO NOT immediately workaround the bug in the Rust code, instead:
 1. Explore the C and Rust code and write a detailed report about what difference may be causing the difference. Identify any other differences between the C code's logic and Rust implementation as well.

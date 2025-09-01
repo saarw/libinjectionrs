@@ -231,4 +231,55 @@ mod tests {
         assert_eq!(state.tokens[0].value_as_str(), "X", 
                    "Evil token value should be 'X'");
     }
+    
+    #[test]
+    fn test_mysql_conditional_comment_fuzz_case() {
+        // This test case reproduces a specific fuzzing differential that was found
+        // Input: '/*!#��\" (bytes: [0x27, 0x2f, 0x2a, 0x21, 0x23, 0xf1, 0xfe, 0x22])
+        // 
+        // The issue was that the C implementation detects MySQL conditional comments (/*!)
+        // even within string content and marks them as EVIL, but the Rust implementation
+        // was missing this post-tokenization analysis.
+        //
+        // C code reference: libinjection_sqli.c lines 454-474 (is_mysql_comment)
+        // and lines 1942-1954 (fingerprint post-processing)
+        
+        let input: &[u8] = &[0x27, 0x2f, 0x2a, 0x21, 0x23, 0xf1, 0xfe, 0x22];
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        
+        println!("=== MySQL Conditional Comment Fuzz Case ===");
+        print!("Input bytes: {:?} -> \"", input);
+        for &byte in input {
+            if byte >= 32 && byte <= 126 {
+                print!("{}", byte as char);
+            } else {
+                print!("\\x{:02x}", byte);
+            }
+        }
+        println!("\"");
+        
+        // Get the fingerprint (this triggers the MySQL comment detection)
+        let fingerprint = state.get_fingerprint();
+        println!("Rust fingerprint: {}", fingerprint);
+        
+        // The input starts with a single quote and contains /*!# sequence
+        // The Rust implementation should detect the MySQL conditional comment pattern
+        // and convert the string token to an EVIL token, producing fingerprint "X"
+        assert_eq!(fingerprint.as_str(), "X", 
+                   "Fingerprint should be 'X' due to MySQL conditional comment detection");
+        
+        // Test that this is detected as SQL injection (matching C behavior)
+        let is_injection = state.detect();
+        assert_eq!(is_injection, true,
+                   "Input containing /*!# should be detected as SQL injection");
+        
+        println!("Final tokens ({} total):", state.tokens.len());
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Token {}: type={:?}, val={:?}", i, token.token_type, token.value_as_str());
+        }
+        
+        // After MySQL comment detection, we should have an EVIL token
+        assert!(state.tokens.iter().any(|t| t.token_type == TokenType::Evil),
+                "Should have at least one EVIL token after MySQL comment detection");
+    }
 }
