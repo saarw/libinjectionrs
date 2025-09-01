@@ -1,3 +1,10 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::indexing_slicing)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::panic)]
+#![allow(clippy::uninlined_format_args)]
+
 use std::env;
 use std::fs::File;
 use std::io::{self, Write};

@@ -1,6 +1,6 @@
 # libinjectionrs
 
-A Rust port of the libinjection library for SQL injection and XSS detection.
+A vibe-ported (AI-assisted translation) of the libinjection library for SQL injection and XSS detection from C to memory-safe Rust.
 
 ## Features
 
@@ -9,6 +9,9 @@ A Rust port of the libinjection library for SQL injection and XSS detection.
 - Zero-copy parsing
 - `no_std` support with optional `alloc`
 - Minimal heap allocations using `SmallVec`
+
+## Linting
+Clippy has been configured to deny unsafe code and many conditions that may result in panics (but still allows indexing into a slice to match the C code). Run clippy with warnings ignored ```cargo clippy --workspace --all-targets -- -A warnings```
 
 ## Usage
 

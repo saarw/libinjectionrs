@@ -27,7 +27,7 @@ fuzz_target!(|data: &[u8]| {
     }
     
     let rust_result = rust_detect_sqli(data);
-    let rust_is_injection = rust_result.is_injection();
+    let rust_is_injection = rust_result.is_injection;
     
     if let Ok(c_is_injection) = call_c_sqli(data) {
         // The implementations should agree on whether input is an injection

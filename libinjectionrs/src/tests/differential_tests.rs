@@ -1,3 +1,9 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::indexing_slicing)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::panic)]
+
 use std::fs;
 use std::path::Path;
 use crate::{detect_sqli, detect_xss};
@@ -312,7 +318,7 @@ mod tests {
         
         // We expect at least some tests to run if the test data exists
         // This is a basic smoke test
-        assert!(result.total_tests >= 0);
+        assert!(result.total_tests > 0);
     }
     
     #[test]

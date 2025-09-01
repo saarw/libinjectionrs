@@ -18,3 +18,5 @@ anyhow = "1.0"
 [build-dependencies]
 bindgen = "0.69"
 cc = "1.0"
+
+# Disable workspace lints for comparison binary that needs unsafe code

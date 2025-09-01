@@ -27,3 +27,6 @@ smallvec = ["dep:smallvec"]
 [lib]
 name = "libinjectionrs"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

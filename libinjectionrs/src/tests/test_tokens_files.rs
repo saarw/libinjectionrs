@@ -1,3 +1,9 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::indexing_slicing)]
+#![allow(clippy::disallowed_methods)]
+#![allow(clippy::panic)]
+
 use std::fs;
 use std::path::Path;
 use crate::sqli::{SqliFlags, SqliTokenizer, Token, TokenType};

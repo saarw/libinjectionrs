@@ -29,3 +29,5 @@ criterion.workspace = true
 [build-dependencies]
 bindgen = "0.69"
 cc = "1.0"
+
+# Disable workspace lints for benchmarks that may need unsafe code and unwrap

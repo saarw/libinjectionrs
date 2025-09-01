@@ -1,4 +1,9 @@
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::indexing_slicing)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::panic)]
 mod tests {
     use crate::detect_xss;
 

@@ -1,6 +1,11 @@
 // SQL injection detection tests
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::indexing_slicing)]
+#[allow(clippy::disallowed_methods)]
+#[allow(clippy::panic)]
 mod tests {
     use crate::sqli::*;
     
@@ -35,7 +40,8 @@ mod tests {
         let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
         let fingerprint = state.fingerprint();
         // Just test that we can create fingerprint without panicking
-        assert!(fingerprint.as_str().len() >= 0);
+        fingerprint.as_str();
+        assert!(true);
     }
     
     #[test]

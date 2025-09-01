@@ -16,18 +16,6 @@ pub mod xss;
 mod tests;
 
 #[cfg(test)]
-mod debug_parsing;
-
-#[cfg(test)]
-mod debug_test_115;
-
-#[cfg(test)]
-mod debug_tokenization;
-
-#[cfg(test)]
-mod debug_folding;
-
-#[cfg(test)]
 mod final_test;
 
 

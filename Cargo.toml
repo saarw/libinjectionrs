@@ -14,3 +14,23 @@ bitflags = "2.6"
 smallvec = "1.13" 
 thiserror = "1.0"
 criterion = { version = "0.5", features = ["html_reports"] }
+
+[workspace.lints.rust]
+# Deny unsafe code
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+# Deny panicking functions
+expect_used = "deny"
+unwrap_used = "deny"
+panic = "deny"
+unimplemented = "deny" 
+unreachable = "deny"
+todo = "deny"
+
+# Additional safety lints
+arithmetic_side_effects = "warn"
+float_arithmetic = "warn"
+
+# Disallow specific methods/macros
+disallowed_methods = "deny"

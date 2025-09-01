@@ -235,7 +235,7 @@ impl<'a> Html5State<'a> {
             return false;
         }
 
-        match self.current_char().unwrap() {
+        match self.current_char().unwrap_or(0) {
             b'!' => {
                 self.advance();
                 self.state_fn = Self::state_markup_declaration_open;
@@ -329,7 +329,7 @@ impl<'a> Html5State<'a> {
             return false;
         }
 
-        match self.current_char().unwrap() {
+        match self.current_char().unwrap_or(0) {
             b'>' => {
                 self.state_fn = Self::state_data;
                 self.next()
@@ -601,7 +601,7 @@ impl<'a> Html5State<'a> {
             return false;
         }
         
-        let ch = self.current_char().unwrap();
+        let ch = self.current_char().unwrap_or(0);
         if Self::is_whitespace(ch) {
             self.advance();
             self.state_before_attribute_name()

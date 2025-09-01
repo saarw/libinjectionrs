@@ -1,0 +1,10 @@
+# Clippy configuration for libinjectionrs
+# Prevents panicking expect/unwrap calls and other dangerous functions
+
+# Deny panicking functions
+disallowed-methods = [
+    "std::option::Option::expect",
+    "std::result::Result::expect", 
+    "std::option::Option::unwrap",
+    "std::result::Result::unwrap",
+]

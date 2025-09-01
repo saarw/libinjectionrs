@@ -14,11 +14,11 @@ fn main() {
     println!("\n=== SQL Injection Detection ===");
     for (input, description) in &sqli_tests {
         let result = detect_sqli(input.as_bytes());
-        let fingerprint_str = result.fingerprint()
+        let fingerprint_str = result.fingerprint
             .map(|fp| fp.to_string())
             .unwrap_or_else(|| "none".to_string());
         println!("{}: {} -> {} (fingerprint: {})", 
-                description, input, result.is_injection(), fingerprint_str);
+                description, input, result.is_injection, fingerprint_str);
     }
     
     // Test XSS detection  
