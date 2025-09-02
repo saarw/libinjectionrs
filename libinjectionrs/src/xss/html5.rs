@@ -235,6 +235,14 @@ impl<'a> Html5State<'a> {
         matches!(ch, 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D)
     }
 
+    // Match C alphabetic check exactly: (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+    // CRITICAL: C uses signed char, so bytes >= 128 become negative and fail the comparison
+    fn is_alphabetic_c_style(ch: u8) -> bool {
+        let ch_signed = ch as i8;  // Convert to signed like C does
+        ((ch_signed >= b'a' as i8) && (ch_signed <= b'z' as i8)) ||
+        ((ch_signed >= b'A' as i8) && (ch_signed <= b'Z' as i8))
+    }
+
     fn state_eof(&mut self) -> bool {
         false
     }
@@ -292,7 +300,7 @@ impl<'a> Html5State<'a> {
                 self.state_fn = Self::state_bogus_comment2;
                 self.next()
             }
-            ch if ch.is_ascii_alphabetic() => {
+            ch if Self::is_alphabetic_c_style(ch) => {
                 self.state_fn = Self::state_tag_name;
                 self.next()
             }
@@ -368,7 +376,7 @@ impl<'a> Html5State<'a> {
                 self.state_fn = Self::state_data;
                 self.next()
             }
-            ch if ch.is_ascii_alphabetic() => {
+            ch if Self::is_alphabetic_c_style(ch) => {
                 self.state_fn = Self::state_tag_name;
                 self.next()
             }
