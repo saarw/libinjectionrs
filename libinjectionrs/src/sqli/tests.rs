@@ -350,6 +350,12 @@ mod tests {
         let fingerprint = state.get_fingerprint();
         println!("Rust fingerprint: {}", fingerprint);
         
+        // Debug: show tokens before get_fingerprint
+        println!("Tokens before get_fingerprint():");
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Token {}: type={:?}, val={:?}", i, token.token_type, token.value_as_str());
+        }
+        
         // The input starts with a single quote and contains /*!# sequence
         // The Rust implementation should detect the MySQL conditional comment pattern
         // and convert the string token to an EVIL token, producing fingerprint "X"
@@ -870,6 +876,34 @@ mod tests {
         // This test should fail initially until the differential is fixed
         assert_eq!(is_sqli_rust, true, 
                    "Rust should match C behavior - expected true but got {}. \
+                    This test should fail initially until the differential is fixed.", 
+                   is_sqli_rust);
+    }
+
+    #[test]
+    fn test_fuzz_differential_percent_signs() {
+        // Test case for fuzz differential that panicked
+        // Input: "%%%%%%%%%%%%%%%%%%%%%%#*#\376\"\016%%q]//*!\361'#&~#a/"
+        // Bytes: [37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 35, 42, 35, 254, 34, 14, 37, 37, 113, 93, 47, 47, 42, 33, 241, 39, 35, 38, 126, 35, 97, 47]
+        // Expected: Rust should return the same as C (C returns false, Rust currently returns true)
+        let input = &[37u8, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 37, 35, 42, 35, 254, 34, 14, 37, 37, 113, 93, 47, 47, 42, 33, 241, 39, 35, 38, 126, 35, 97, 47];
+        
+        // Test with detect() method (as used in the fuzz test)
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.get_fingerprint();
+        
+        println!("Fuzz differential test with percent signs:");
+        println!("  Input bytes: {:?}", input);
+        println!("  Input string (lossy): {:?}", String::from_utf8_lossy(input));
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        println!("  Expected (C) detection: false");
+        
+        // The C implementation returns false for this input
+        // This test should fail initially until the differential is fixed
+        assert_eq!(is_sqli_rust, false, 
+                   "Rust should match C behavior - expected false but got {}. \
                     This test should fail initially until the differential is fixed.", 
                    is_sqli_rust);
     }
