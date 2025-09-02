@@ -270,34 +270,47 @@ impl XssDetector {
     }
 
     // Case-insensitive string comparison that ignores null bytes
+    // Replicates the exact behavior of C's cstrcasecmp_with_null function
     fn cstrcasecmp_with_null(pattern: &[u8], input: &[u8]) -> bool {
         let mut pattern_idx = 0;
         let mut input_idx = 0;
-
-        while pattern_idx < pattern.len() && input_idx < input.len() {
-            if input[input_idx] == 0 {
-                input_idx += 1;
+        
+        // Loop through input length (like C's n-- > 0)
+        while input_idx < input.len() {
+            let input_char = input[input_idx];
+            input_idx += 1;
+            
+            // Skip null bytes in input (like C's cb == '\0')
+            if input_char == 0 {
                 continue;
             }
-
-            let pattern_char = pattern[pattern_idx];
-            let mut input_char = input[input_idx];
-
-            // Convert to uppercase
-            if input_char >= b'a' && input_char <= b'z' {
-                input_char -= 0x20;
+            
+            // Always advance pattern pointer (like C's ca = a[ai++])
+            if pattern_idx >= pattern.len() {
+                return false; // Pattern exhausted but input continues
             }
-
-            if pattern_char != input_char {
+            let pattern_char = pattern[pattern_idx];
+            pattern_idx += 1;
+            
+            // Convert input character to uppercase (like C)
+            let mut cb = input_char;
+            if cb >= b'a' && cb <= b'z' {
+                cb -= 0x20;
+            }
+            
+            // Compare characters (like C's ca != cb)
+            if pattern_char != cb {
                 return false;
             }
-
-            pattern_idx += 1;
-            input_idx += 1;
         }
-
-        // Pattern must be fully consumed
-        pattern_idx == pattern.len()
+        
+        // Check if pattern is fully consumed (like C's final ca = a[ai++]; ca == '\0')
+        // In C, this reads the next character and checks if it's null terminator
+        if pattern_idx >= pattern.len() {
+            return true; // Pattern fully consumed (equivalent to C's ca == '\0')
+        } else {
+            return false; // Pattern not fully consumed (equivalent to C's ca != '\0')
+        }
     }
 
     // HTML-encoded string starts with pattern (case insensitive)
