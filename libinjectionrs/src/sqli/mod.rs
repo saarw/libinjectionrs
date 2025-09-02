@@ -1304,6 +1304,15 @@ impl<'a> SqliState<'a> {
             // Continue with default behavior (return true at end of function)
         }
         
+        // Check if middle token is a keyword (matching C behavior at libinjection_sqli.c:2201-2209)
+        if self.tokens.len() >= 2 && self.tokens[1].token_type == TokenType::Keyword {
+            // If it's not "INTO OUTFILE" or "INTO DUMPFILE" (MySQL), then treat as safe
+            if self.tokens[1].len < 5 || 
+               !self.tokens[1].val.starts_with(b"INTO") {
+                return false;
+            }
+        }
+        
         // More whitelist rules...
         
         true

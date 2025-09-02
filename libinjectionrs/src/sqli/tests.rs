@@ -45,6 +45,23 @@ mod tests {
     }
     
     #[test]
+    fn test_fuzz_differential_case_skv() {
+        // Test case from fuzzer: "As@'As@'j@Qsj@Qs"
+        // This case revealed a missing whitelist check for keywords in 3-token fingerprints
+        let input = b"As@'As@'j@Qsj@Qs";
+        
+        // Test with detect() method which checks multiple contexts
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let is_sqli = state.detect();
+        let fp = state.get_fingerprint();
+        
+        // The C implementation returns FALSE for this input with fingerprint "skv"
+        // because the middle token "As" is a keyword with length < 5
+        assert_eq!(is_sqli, false, "Should match C implementation - fingerprint: {}", fp);
+        assert_eq!(fp.as_str(), "skv", "Should produce 'skv' fingerprint");
+    }
+    
+    #[test]
     fn debug_fuzz_crash_case() {
         // Test the specific case that was crashing in fuzz testing
         let input = b"--1-@a#*\x03";
