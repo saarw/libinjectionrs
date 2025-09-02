@@ -130,6 +130,7 @@ void analyze_input(const unsigned char* input, size_t len) {
     int result = libinjection_is_sqli(&state);
     
     printf("FINGERPRINT: %s\n", state.fingerprint);
+    printf("STATS_TOKENS: %d\n", state.stats_tokens);
     printf("IS_SQLI: %d\n", result ? 1 : 0);
     
     // Final tokens (after folding)

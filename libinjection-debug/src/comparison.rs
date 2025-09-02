@@ -9,7 +9,7 @@ pub struct CTokenizerHarness {
 impl CTokenizerHarness {
     pub fn new() -> Self {
         Self {
-            harness_path: "c_harness/debug_harness".to_string(),
+            harness_path: "libinjection-debug/c_harness/debug_harness".to_string(),
         }
     }
     
