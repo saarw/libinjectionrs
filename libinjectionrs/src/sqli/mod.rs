@@ -1141,12 +1141,8 @@ impl<'a> SqliState<'a> {
     
     fn check_is_sqli(&self, fingerprint: &Fingerprint) -> bool {
         let is_bl = blacklist::is_blacklisted(fingerprint.as_str());
-        #[cfg(debug_assertions)]
-        eprintln!("DEBUG check_is_sqli: fp='{}', blacklisted={}", fingerprint.as_str(), is_bl);
         if is_bl {
             let result = self.is_not_whitelist();
-            #[cfg(debug_assertions)]
-            eprintln!("DEBUG check_is_sqli: is_not_whitelist={}", result);
             result
         } else {
             false
