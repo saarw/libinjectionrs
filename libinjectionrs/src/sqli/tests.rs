@@ -346,35 +346,31 @@ mod tests {
         }
         println!("\"");
         
-        // Get the fingerprint (this triggers the MySQL comment detection)
-        let fingerprint = state.get_fingerprint();
-        println!("Rust fingerprint: {}", fingerprint);
-        
-        // Debug: show tokens before get_fingerprint
-        println!("Tokens before get_fingerprint():");
-        for (i, token) in state.tokens.iter().enumerate() {
-            println!("  Token {}: type={:?}, val={:?}", i, token.token_type, token.value_as_str());
-        }
-        
-        // The input starts with a single quote and contains /*!# sequence
-        // The Rust implementation should detect the MySQL conditional comment pattern
-        // and convert the string token to an EVIL token, producing fingerprint "X"
-        assert_eq!(fingerprint.as_str(), "X", 
-                   "Fingerprint should be 'X' due to MySQL conditional comment detection");
-        
         // Test that this is detected as SQL injection (matching C behavior)
+        // This will try multiple flag combinations like the C implementation
         let is_injection = state.detect();
+        
+        println!("Rust detection result: {}", is_injection);
+        
+        // After detect(), get the final fingerprint that was used for detection
+        let final_fingerprint = state.get_fingerprint();
+        println!("Final Rust fingerprint: {}", final_fingerprint);
+        
+        // C implementation results for input '/*!#��":
+        // FINGERPRINT: X
+        // IS_SQLI: 1 (true)
+        // This shows that C detects MySQL conditional comments (/*!) and creates Evil tokens
+        
         assert_eq!(is_injection, true,
-                   "Input containing /*!# should be detected as SQL injection");
+                   "Input containing /*!# should be detected as SQL injection like C implementation");
+                   
+        assert_eq!(final_fingerprint.as_str(), "X", 
+                   "Final fingerprint should be 'X' to match C implementation");
         
         println!("Final tokens ({} total):", state.tokens.len());
         for (i, token) in state.tokens.iter().enumerate() {
             println!("  Token {}: type={:?}, val={:?}", i, token.token_type, token.value_as_str());
         }
-        
-        // After MySQL comment detection, we should have an EVIL token
-        assert!(state.tokens.iter().any(|t| t.token_type == TokenType::Evil),
-                "Should have at least one EVIL token after MySQL comment detection");
     }
 
     #[test]
@@ -960,6 +956,35 @@ mod tests {
         
         // The C implementation returns false for this input
         // This test should fail initially until the differential is fixed
+        assert_eq!(is_sqli_rust, false, 
+                   "Rust should match C behavior - expected false but got {}. \
+                    This test should fail initially until the differential is fixed.", 
+                   is_sqli_rust);
+    }
+
+    #[test]
+    fn test_fuzz_differential_backslash_quote_pattern() {
+        // Test case for fuzz differential that panicked at fuzz_targets/fuzz_differential_sqli.rs:41:17
+        // Input: "\\\\\\\\\\\\\\\\\\\"\\\\\\\\\\\\\\\\\"]\"/*!\\\"^*"
+        // Bytes: [92, 92, 92, 92, 92, 92, 92, 92, 92, 34, 92, 92, 92, 92, 92, 92, 92, 92, 34, 93, 34, 47, 42, 33, 92, 34, 94, 42]
+        // Expected: Rust should return false to match C behavior (C returns false, Rust currently returns true)
+        let input = &[92u8, 92, 92, 92, 92, 92, 92, 92, 92, 34, 92, 92, 92, 92, 92, 92, 92, 92, 34, 93, 34, 47, 42, 33, 92, 34, 94, 42];
+        
+        println!("=== Fuzz Differential Test: Backslash Quote Pattern ===");
+        println!("Input bytes: {:?}", input);
+        println!("Input as string (lossy): {:?}", String::from_utf8_lossy(input));
+        
+        // Test with detect() method (as used in the fuzz test)
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.get_fingerprint();
+        
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        println!("  Expected (C) detection: false");
+        
+        // The C implementation returns false for this input  
+        // This test should fail initially - Rust currently returns true but should return false to match C
         assert_eq!(is_sqli_rust, false, 
                    "Rust should match C behavior - expected false but got {}. \
                     This test should fail initially until the differential is fixed.", 

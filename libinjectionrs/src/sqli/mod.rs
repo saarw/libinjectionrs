@@ -310,10 +310,6 @@ impl<'a> SqliState<'a> {
     fn fingerprint(&mut self) -> Fingerprint {
         let token_count = self.fold_tokens();
         
-        // Additional MySQL conditional comment detection for strings not caught during tokenization
-        // This complements the normal tokenization-time detection in parse_slash()
-        self.detect_mysql_comments_at_string_start(token_count);
-        
         self.generate_fingerprint(token_count);
         Fingerprint::new(self.fingerprint)
     }
@@ -1004,52 +1000,6 @@ impl<'a> SqliState<'a> {
         }
         
         if n == 0 { 0 } else { 0 }
-    }
-    
-    /// Checks if a token contains MySQL conditional comment patterns (/*!) at the START
-    /// 
-    /// This matches the C implementation's MySQL comment detection logic.
-    /// C code reference: libinjection_sqli.c lines 454-474 (is_mysql_comment function)
-    /// which checks: cs[pos + 2] != '!' to detect /*!
-    fn has_mysql_conditional_comment_at_start(&self, token: &Token) -> bool {
-        if token.len < 3 {
-            return false;
-        }
-        
-        // Only check the first 3 characters for /*!
-        // This matches C's is_mysql_comment logic: cs[pos] == '/' && cs[pos+1] == '*' && cs[pos+2] == '!'
-        let content = &token.val[..token.len.min(3)];
-        content[0] == b'/' && content[1] == b'*' && content[2] == b'!'
-    }
-    
-    /// Post-process tokens to detect MySQL conditional comments that create Evil tokens
-    /// 
-    /// This handles cases where MySQL conditional comments (/*!) appear in string tokens
-    /// that were not caught during the normal tokenization phase. This complements the 
-    /// tokenization-time detection that happens in parse_slash().
-    /// 
-    /// The C implementation detects MySQL conditional comments and creates Evil tokens
-    /// during tokenization in parse_slash() (libinjection_sqli.c lines 513-514):
-    /// ```c
-    /// } else if (is_mysql_comment(cs, slen, pos)) {
-    ///     ctype = TYPE_EVIL;
-    /// }
-    /// ```
-    /// 
-    /// However, some cases may not be caught during tokenization (e.g., when parsing
-    /// strings with specific quote contexts), so this function provides additional
-    /// detection for strings that start with /*! patterns.
-    /// 
-    /// Note: The C code at lines 1942-1954 does NOT create Evil tokens - it only
-    /// post-processes existing Evil tokens to clean up the fingerprint.
-    fn detect_mysql_comments_at_string_start(&mut self, token_count: usize) {
-        for i in 0..token_count.min(self.tokens.len()) {
-            if self.tokens[i].token_type == TokenType::String {
-                if self.has_mysql_conditional_comment_at_start(&self.tokens[i]) {
-                    self.tokens[i].token_type = TokenType::Evil;
-                }
-            }
-        }
     }
     
     fn generate_fingerprint(&mut self, token_count: usize) {
