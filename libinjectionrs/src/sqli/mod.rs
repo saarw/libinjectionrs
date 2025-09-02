@@ -893,6 +893,24 @@ impl<'a> SqliState<'a> {
             left = LIBINJECTION_SQLI_MAX_TOKENS;
         }
         
+        // Check for magic PHP backquote comment BEFORE copying tokens
+        // This matches C implementation behavior in libinjection_sqli.c lines 1917-1922
+        // If:
+        // * last token is of type "bareword"
+        // * And is quoted in a backtick
+        // * And isn't closed
+        // * And it's empty?
+        // Then convert it to comment
+        if left > 2 {
+            let last_token = &mut self.token_vec[left - 1];
+            if last_token.token_type == TokenType::Bareword &&
+               last_token.str_open == b'`' &&
+               last_token.len == 0 &&
+               last_token.str_close == 0 {
+                last_token.token_type = TokenType::Comment;
+            }
+        }
+        
         // Copy final tokens to the tokens vector for fingerprinting
         self.tokens.clear();
         for i in 0..left {
@@ -1122,8 +1140,14 @@ impl<'a> SqliState<'a> {
     }
     
     fn check_is_sqli(&self, fingerprint: &Fingerprint) -> bool {
-        if blacklist::is_blacklisted(fingerprint.as_str()) {
-            self.is_not_whitelist()
+        let is_bl = blacklist::is_blacklisted(fingerprint.as_str());
+        #[cfg(debug_assertions)]
+        eprintln!("DEBUG check_is_sqli: fp='{}', blacklisted={}", fingerprint.as_str(), is_bl);
+        if is_bl {
+            let result = self.is_not_whitelist();
+            #[cfg(debug_assertions)]
+            eprintln!("DEBUG check_is_sqli: is_not_whitelist={}", result);
+            result
         } else {
             false
         }
