@@ -1146,8 +1146,19 @@ impl<'a> SqliTokenizer<'a> {
     // Helper functions
     
     fn is_white_char(&self, ch: u8) -> bool {
-        use crate::sqli::sqli_data::{get_char_type, CharType};
-        matches!(get_char_type(ch), CharType::White)
+        // Match C implementation exactly - libinjection_sqli.c lines 194-205 (char_is_white function)
+        // C code: return strchr(" \t\n\v\f\r\240\000", ch) != NULL;
+        // C comment:
+        // /* ' '  space is 0x32
+        //    '\t  0x09 \011 horizontal tab
+        //    '\n' 0x0a \012 new line
+        //    '\v' 0x0b \013 vertical tab
+        //    '\f' 0x0c \014 new page
+        //    '\r' 0x0d \015 carriage return
+        //         0x00 \000 null (oracle)
+        //         0xa0 \240 is Latin-1
+        // */
+        matches!(ch, b' ' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r' | 0xA0 | 0x00)
     }
     
     fn memchr(&self, needle: u8, haystack: &[u8]) -> Option<usize> {
