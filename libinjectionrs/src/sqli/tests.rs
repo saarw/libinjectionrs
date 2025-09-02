@@ -778,5 +778,100 @@ mod tests {
                     This test should fail initially until the differential is fixed.", 
                    is_sqli_rust);
     }
+
+    #[test]
+    fn test_fuzz_differential_input_1a0_2d_2d_02() {
+        // Test case for fuzz differential that panicked at fuzz_targets/fuzz_differential_sqli.rs:41:17
+        // Input: "1�--\u{2}" 
+        // Bytes: [49, 160, 45, 45, 2]
+        // Expected: Rust should return the same as C (C returns true, Rust currently returns false)
+        let input = &[49u8, 160, 45, 45, 2]; // "1�--\u{2}"
+        
+        println!("=== Detailed Debug Analysis ===");
+        println!("Input bytes: {:?}", input);
+        println!("Input as string (lossy): {:?}", String::from_utf8_lossy(input));
+        
+        // Test blacklist directly
+        println!("\n--- Blacklist Test ---");
+        println!("is_blacklisted('1c'): {}", blacklist::is_blacklisted("1c"));
+        println!("is_blacklisted('1o'): {}", blacklist::is_blacklisted("1o"));
+        
+        // Test the first pass only - ANSI mode
+        let mut state1 = SqliState::new(input, SqliFlags::FLAG_NONE);
+        println!("\n--- First Pass (ANSI Mode) ---");
+        println!("Initial flags after FLAG_NONE conversion: {:?}", state1.flags);
+        println!("is_ansi(): {}", state1.flags.is_ansi());
+        println!("is_mysql(): {}", state1.flags.is_mysql());
+        
+        let fingerprint1 = state1.get_fingerprint();
+        println!("Fingerprint: '{}'", fingerprint1.as_str());
+        println!("stats_comment_ddx: {}", state1.stats_comment_ddx);
+        println!("stats_comment_hash: {}", state1.stats_comment_hash);
+        println!("reparse_as_mysql(): {}", state1.reparse_as_mysql());
+        
+        // Test whitelist - add detailed debugging
+        println!("check_is_sqli('1c'): {}", state1.check_is_sqli(&fingerprint1));
+        let whitelist_result = state1.is_not_whitelist();
+        println!("is_not_whitelist(): {}", whitelist_result);
+        
+        // Debug whitelist logic step by step
+        println!("Whitelist debug:");
+        println!("  fingerprint length: {}", fingerprint1.as_str().len());
+        println!("  tokens.len(): {}", state1.tokens.len());
+        println!("  stats_tokens: {}", state1.stats_tokens);
+        if state1.tokens.len() >= 2 {
+            println!("  token[0]: {:?} '{}' pos={} len={}", 
+                     state1.tokens[0].token_type, state1.tokens[0].value_as_str(),
+                     state1.tokens[0].pos, state1.tokens[0].len);
+            println!("  token[1]: {:?} '{}' pos={} len={}", 
+                     state1.tokens[1].token_type, state1.tokens[1].value_as_str(),
+                     state1.tokens[1].pos, state1.tokens[1].len);
+        }
+        
+        // Check tokens after first pass
+        println!("Tokens after first pass:");
+        for (i, token) in state1.tokens.iter().enumerate() {
+            println!("  Token {}: {:?} '{}' (pos: {}, len: {})", 
+                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+        }
+        
+        // Test the second pass - MySQL mode (if needed)
+        if state1.reparse_as_mysql() {
+            println!("\n--- Second Pass (MySQL Mode) ---");
+            let original_flags = SqliFlags::FLAG_NONE; // Original passed to constructor
+            let mysql_flags = (original_flags.0 & !SqliFlags::FLAG_SQL_ANSI.0) | SqliFlags::FLAG_SQL_MYSQL.0;
+            println!("MySQL flags: {:?}", SqliFlags::new(mysql_flags));
+            
+            let mut state2 = SqliState::new(input, SqliFlags::new(mysql_flags));
+            let fingerprint2 = state2.get_fingerprint();
+            println!("MySQL fingerprint: '{}'", fingerprint2.as_str());
+            
+            // Check tokens after MySQL pass
+            println!("Tokens after MySQL pass:");
+            for (i, token) in state2.tokens.iter().enumerate() {
+                println!("  Token {}: {:?} '{}' (pos: {}, len: {})", 
+                         i, token.token_type, token.value_as_str(), token.pos, token.len);
+            }
+        } else {
+            println!("\n--- No MySQL Reparse Needed ---");
+        }
+        
+        // Test full detect() method
+        println!("\n--- Full detect() Method ---");
+        let mut state_full = SqliState::new(input, SqliFlags::FLAG_NONE);
+        let is_sqli_rust = state_full.detect();
+        let fingerprint_rust = state_full.get_fingerprint();
+        
+        println!("Final result: {}", is_sqli_rust);
+        println!("Final fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("Expected (C) detection: true");
+        
+        // The C implementation returns true for this input
+        // This test should fail initially until the differential is fixed
+        assert_eq!(is_sqli_rust, true, 
+                   "Rust should match C behavior - expected true but got {}. \
+                    This test should fail initially until the differential is fixed.", 
+                   is_sqli_rust);
+    }
     
 }

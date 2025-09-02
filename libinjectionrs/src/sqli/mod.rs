@@ -1236,8 +1236,12 @@ impl<'a> SqliState<'a> {
             if token0_end < self.input.len() {
                 let ch = self.input[token0_end];
                 
-                if ch <= 32 {
-                    // Next char was whitespace, e.g. "1234 --"
+                // CRITICAL: C uses signed char comparison, so 0xa0 becomes -96
+                // We must cast to i8 to match C behavior exactly
+                let ch_signed = ch as i8;
+                if ch_signed <= 32 {
+                    // Next char was whitespace, e.g. "1234 --"  
+                    // This also catches high-byte characters like 0xa0 (-96) that C treats as whitespace
                     return true;
                 }
                 
