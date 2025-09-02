@@ -552,4 +552,34 @@ mod tests {
         // Both flag combinations should not detect SQL injection
         assert!(!is_sqli_rust, "Should not detect as SQL injection with FLAG_QUOTE_NONE");
     }
+
+    #[test]
+    fn test_fuzz_differential_0xff_chars() {
+        // Test the fuzz input that revealed another differential
+        // Input: "$8--\xff)\xff\x03\xff)"
+        // C returns: true (detected as SQLi)
+        // Rust returns: false (not detected as SQLi)
+        let input = &[0x24, 0x38, 0x2d, 0x2d, 0xff, 0x29, 0xff, 0x03, 0xff, 0x29];
+        
+        // Test with FLAG_NONE (as used in the fuzz test)
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.fingerprint();
+        
+        println!("Fuzz differential test with 0xFF characters:");
+        println!("  Input bytes: {:?}", input);
+        println!("  Input string (lossy): {:?}", String::from_utf8_lossy(input));
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        println!("  C detection: true");
+        
+        // This test is expected to FAIL until the bug is fixed
+        // The C implementation detects this as SQLi (returns true)
+        // Currently Rust does not detect it (returns false)
+        // TODO: Fix this differential - Rust should match C behavior
+        assert!(is_sqli_rust, 
+                "KNOWN BUG: Rust should detect this as SQL injection to match C behavior. \
+                 Input: $8--\\xff)\\xff\\x03\\xff), C: true, Rust: {}", 
+                is_sqli_rust);
+    }
 }

@@ -138,9 +138,17 @@ pub struct SqliState<'a> {
 
 impl<'a> SqliState<'a> {
     pub fn new(input: &'a [u8], flags: SqliFlags) -> Self {
+        // Match C behavior: if flags == 0, set to FLAG_QUOTE_NONE | FLAG_SQL_ANSI
+        // C code reference: libinjection_sqli.c line 1251-1253 and line 1268-1270
+        let adjusted_flags = if flags == SqliFlags::FLAG_NONE {
+            SqliFlags(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0)
+        } else {
+            flags
+        };
+        
         SqliState {
             input,
-            flags,
+            flags: adjusted_flags,
             #[cfg(feature = "smallvec")]
             tokens: SmallVec::new(),
             #[cfg(not(feature = "smallvec"))]
@@ -201,7 +209,10 @@ impl<'a> SqliState<'a> {
             return true;
         } else if self.reparse_as_mysql() {
             // Only switch to MySQL mode if reparsing is needed
-            self.reset(SqliFlags::new(original_flags.0 | SqliFlags::FLAG_SQL_MYSQL.0));
+            // C code reference: libinjection_sqli.c lines 2279-2286
+            // C uses FLAG_QUOTE_NONE | FLAG_SQL_MYSQL (replaces ANSI with MySQL)
+            let mysql_flags = (original_flags.0 & !SqliFlags::FLAG_SQL_ANSI.0) | SqliFlags::FLAG_SQL_MYSQL.0;
+            self.reset(SqliFlags::new(mysql_flags));
             let fingerprint = self.fingerprint();
             if self.check_is_sqli(&fingerprint) {
                 return true;
@@ -215,6 +226,8 @@ impl<'a> SqliState<'a> {
             if self.check_is_sqli(&fingerprint) {
                 return true;
             } else if self.reparse_as_mysql() {
+                // C code reference: libinjection_sqli.c lines 2294-2301  
+                // C uses FLAG_QUOTE_SINGLE | FLAG_SQL_MYSQL (replaces ANSI with MySQL)
                 self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_SINGLE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
                 let fingerprint = self.fingerprint();
                 if self.check_is_sqli(&fingerprint) {
@@ -272,7 +285,15 @@ impl<'a> SqliState<'a> {
     }
     
     fn reset(&mut self, flags: SqliFlags) {
-        self.flags = flags;
+        // Match C behavior: if flags == 0, set to FLAG_QUOTE_NONE | FLAG_SQL_ANSI
+        // C code reference: libinjection_sqli.c line 1268-1270 (libinjection_sqli_reset function)
+        let adjusted_flags = if flags == SqliFlags::FLAG_NONE {
+            SqliFlags(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0)
+        } else {
+            flags
+        };
+        
+        self.flags = adjusted_flags;
         self.pos = 0;
         self.tokens.clear();
         self.current_token = None;
