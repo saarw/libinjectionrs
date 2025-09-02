@@ -908,4 +908,61 @@ mod tests {
                    is_sqli_rust);
     }
     
+    #[test]
+    fn test_fuzz_differential_quote_newline_quote() {
+        // Test case for fuzz differential that panicked at fuzz_targets/fuzz_differential_sqli.rs:41:17
+        // Input: "q'�'��������'\n+''#" 
+        // Bytes: [113, 39, 255, 39, 255, 255, 255, 255, 255, 255, 255, 255, 39, 10, 43, 39, 39, 35]
+        // Expected: Rust should return the same as C (C returns false, Rust currently returns true)
+        let input = &[113u8, 39, 255, 39, 255, 255, 255, 255, 255, 255, 255, 255, 39, 10, 43, 39, 39, 35];
+        
+        println!("=== Fuzz Differential Test: Quote Newline Quote ===");
+        println!("Input bytes: {:?}", input);
+        println!("Input as string (lossy): {:?}", String::from_utf8_lossy(input));
+        
+        // Show raw tokenization first
+        println!("\n=== Raw Tokenization Debug ===");
+        let mut tokenizer = crate::sqli::tokenizer::SqliTokenizer::new(input, SqliFlags::FLAG_NONE);
+        let mut token_count = 0;
+        while let Some(token) = tokenizer.next_token() {
+            println!("Raw Token {}: type={:?}, val='{}', pos={}, len={}, str_open={:02x}, str_close={:02x}",
+                     token_count, token.token_type, token.value_as_str(), 
+                     token.pos, token.len, token.str_open, token.str_close);
+            token_count += 1;
+            if token_count >= 10 {
+                println!("  (limiting to first 10 tokens)");
+                break;
+            }
+        }
+        
+        // Test with detect() method (as used in the fuzz test)
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        
+        println!("\n=== After Folding ===");
+        let _folded_count = state.fold_tokens();
+        println!("Tokens after folding:");
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Folded Token {}: type={:?}, val='{}', pos={}, len={}",
+                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+        }
+        
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.get_fingerprint();
+        
+        println!("\n=== Final Results ===");
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        println!("  Expected (C) detection: false");
+        
+        // Debug blacklist status for both fingerprints
+        println!("  C fingerprint 'snsos' blacklisted: {}", blacklist::is_blacklisted("snsos"));
+        println!("  Rust fingerprint 'sosc' blacklisted: {}", blacklist::is_blacklisted("sosc"));
+        
+        // The C implementation returns false for this input
+        // This test should fail initially until the differential is fixed
+        assert_eq!(is_sqli_rust, false, 
+                   "Rust should match C behavior - expected false but got {}. \
+                    This test should fail initially until the differential is fixed.", 
+                   is_sqli_rust);
+    }
 }

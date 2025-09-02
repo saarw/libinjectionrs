@@ -804,7 +804,11 @@ impl<'a> SqliTokenizer<'a> {
         }
         
         let start_delim = self.input[pos + 2];
-        if start_delim < 33 {
+        // Match C logic exactly: libinjection_sqli.c:747-748
+        // C uses signed char, so bytes 128-255 become negative values
+        // The condition "ch < 33" catches both low ASCII and high bytes (128-255)
+        let start_delim_signed = start_delim as i8;
+        if start_delim_signed < 33 {
             return self.parse_word();
         }
         
