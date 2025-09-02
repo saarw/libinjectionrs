@@ -33,10 +33,25 @@ if result.is_injection() {
 }
 ```
 
+## Fuzzing
+Scripts create fuzz corpuses:
+  What the script does:
+
+  1. SQLi corpus: Extracts 50 SQL injection test cases from test-sqli-*.txt
+  files
+  2. XSS corpus: Extracts 63 HTML/XSS test cases from test-html5-*.txt files
+
+  3. Deduplication: Uses SHA1 hashes to avoid duplicate entries
+  4. Proper naming: Prefixes seeded files with seed_sqli_ or seed_xss_
+
+  Usage:
+
+  ./scripts/seed_fuzz_corpus.sh sqli    # Seed SQLi corpus only
+  ./scripts/seed_fuzz_corpus.sh xss     # Seed XSS corpus only  
+  ./scripts/seed_fuzz_corpus.sh all     # Seed both corpora
+
 ## License
 
-Licensed under either of:
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+Licensed under the BSD 3-Clause License ([LICENSE](LICENSE) or https://opensource.org/licenses/BSD-3-Clause).
 
-at your option.
+This project is a Rust port of [libinjection](https://github.com/client9/libinjection), which is also licensed under the BSD 3-Clause License.

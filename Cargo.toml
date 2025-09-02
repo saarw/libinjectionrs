@@ -6,7 +6,7 @@ members = ["libinjectionrs", "comparison-bin", "benches"]
 version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
-license = "MIT OR Apache-2.0"
+license = "BSD-3-Clause"
 repository = "https://github.com/yourusername/libinjectionrs"
 
 [workspace.dependencies]
