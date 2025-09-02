@@ -935,9 +935,12 @@ impl<'a> SqliState<'a> {
         }
         
         // Copy final tokens to the tokens vector for fingerprinting
+        // Use pos instead of left to include all tokens that were collected
         self.tokens.clear();
-        for i in 0..left {
-            self.tokens.push(self.token_vec[i].clone());
+        for i in 0..pos.min(LIBINJECTION_SQLI_MAX_TOKENS) {
+            if self.token_vec[i].token_type != TokenType::None {
+                self.tokens.push(self.token_vec[i].clone());
+            }
         }
         
         // Copy tokenizer statistics
@@ -947,13 +950,11 @@ impl<'a> SqliState<'a> {
         self.stats_comment_hash = tokenizer.stats_comment_hash;
         
         // Add last comment back to token array if there's space (matches C lines 1873-1877)
-        if left < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
-            self.token_vec[left] = last_comment.clone();
+        if self.tokens.len() < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
             self.tokens.push(last_comment);
-            left += 1;
         }
         
-        left
+        self.tokens.len()
     }
     
     fn is_unary_op(&self, token: &Token) -> bool {
@@ -1087,7 +1088,7 @@ impl<'a> SqliState<'a> {
     fn generate_fingerprint(&mut self, token_count: usize) {
         let mut fp_idx = 0;
         
-        for i in 0..token_count.min(LIBINJECTION_SQLI_MAX_TOKENS) {
+        for i in 0..token_count {
             if fp_idx >= 8 || i >= self.tokens.len() {
                 break;
             }
@@ -1368,3 +1369,6 @@ use tokenizer::CHAR_NULL;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod test_evil_tokens;

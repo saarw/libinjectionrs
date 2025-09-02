@@ -634,4 +634,39 @@ mod tests {
         
         println!("✅ C bug compatibility verified - input correctly returns false despite being SQLi");
     }
+
+    #[test]
+    fn test_fuzz_differential_evil_token_fix() {
+        /// Test case for the fuzz differential where Rust was returning false while C returned true.
+        /// This was caused by Evil tokens not contributing to fingerprint generation due to:
+        /// 1. Token copying only copying up to 'left' count instead of full token count
+        /// 2. Fingerprint generation limiting to LIBINJECTION_SQLI_MAX_TOKENS instead of processing all tokens
+        /// 
+        /// The fix ensures Evil tokens are properly included in fingerprints and trigger SQL injection detection.
+        let input = vec![
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255,  // 10 x 0xFF bytes
+            101, 35, 35, 92, 102,                               // e##\f 
+            239, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,  // 11 more bytes including 0xFF
+            43, 154, 251, 123, 96                               // Final bytes
+        ];
+        
+        let mut state = SqliState::new(&input, SqliFlags::FLAG_NONE);
+        let is_sqli = state.detect();
+        let fingerprint = state.get_fingerprint();
+        
+        // The fix should result in:
+        // 1. Evil token creation during folding (zero-length token gets converted to Evil)
+        // 2. Evil token contributes 'X' to fingerprint 
+        // 3. Any fingerprint containing 'X' gets converted to pure 'X' fingerprint
+        // 4. Fingerprint 'X' triggers SQL injection detection
+        assert!(is_sqli, "Should detect SQL injection (matching C behavior)");
+        assert_eq!(fingerprint.as_str(), "X", "Fingerprint should be 'X' when Evil tokens are present");
+        
+        // Verify we have exactly one Evil token after fingerprint processing
+        assert_eq!(state.tokens.len(), 1, "Should have exactly 1 token after Evil fingerprint processing");
+        assert_eq!(state.tokens[0].token_type, TokenType::Evil, "Single token should be Evil type");
+        assert_eq!(state.tokens[0].value_as_str(), "X", "Evil token value should be 'X'");
+        
+        println!("✅ Fuzz differential fixed - Evil tokens now contribute to SQL injection detection");
+    }
 }
