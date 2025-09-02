@@ -77,6 +77,10 @@ impl<'a> Html5State<'a> {
     pub fn next(&mut self) -> bool {
         (self.state_fn)(self)
     }
+    
+    pub fn position(&self) -> usize {
+        self.pos
+    }
 
     fn is_eof(&self) -> bool {
         self.pos >= self.len
@@ -124,6 +128,29 @@ impl<'a> Html5State<'a> {
             }
         }
         None
+    }
+    
+    // Match C h5_skip_white exactly: includes 0x00 for IE compatibility
+    // CRITICAL: C uses signed char, so 0xFF becomes -1 (CHAR_EOF)
+    fn h5_skip_white(&mut self) -> Option<u8> {
+        while self.pos < self.len {
+            let ch = self.s[self.pos];
+            match ch {
+                0x00 | 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D => {  // IE only cases + standard whitespace
+                    self.pos += 1;
+                }
+                0xFF => {
+                    // In C: char ch = hs->s[hs->pos]; when hs->s[pos] = 0xFF
+                    // ch becomes -1 due to signed char conversion
+                    // return ch; returns -1 which equals CHAR_EOF
+                    return None;  // Equivalent to returning CHAR_EOF (-1)
+                }
+                _ => {
+                    return Some(ch);  // return the non-whitespace character
+                }
+            }
+        }
+        None  // EOF - equivalent to CHAR_EOF
     }
 
     fn find_byte(&self, byte: u8, start: usize) -> Option<usize> {
@@ -198,7 +225,12 @@ impl<'a> Html5State<'a> {
     }
 
     fn is_whitespace(ch: u8) -> bool {
-        matches!(ch, 0x00 | 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D)
+        matches!(ch, 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D)
+    }
+    
+    // Match C h5_is_white function exactly: " \t\n\v\f\r"
+    fn h5_is_white(ch: u8) -> bool {
+        matches!(ch, 0x20 | 0x09 | 0x0A | 0x0B | 0x0C | 0x0D)
     }
 
     fn state_eof(&mut self) -> bool {
@@ -421,7 +453,7 @@ impl<'a> Html5State<'a> {
     fn state_before_attribute_name(&mut self) -> bool {
         // Manual tail call optimization loop
         loop {
-            match self.skip_whitespace() {
+            match self.h5_skip_white() {
                 None => return false, // EOF
                 Some(b'/') => {
                     self.advance();
@@ -446,59 +478,62 @@ impl<'a> Html5State<'a> {
     }
 
     fn state_attribute_name(&mut self) -> bool {
-        let start = self.pos;
-        // Match C implementation: start scanning from pos + 1
-        self.advance();
+        // Match C implementation exactly line by line
+        let start_pos = self.pos;  // Store initial position
+        let mut scan_pos = self.pos + 1;  // pos = hs->pos + 1
         
-        while self.pos < self.len {
-            let ch = self.s[self.pos];
-            if Self::is_whitespace(ch) {
-                self.set_token(TokenType::AttrName, start, self.pos - start);
-                self.advance();
+        while scan_pos < self.len {  // while (pos < hs->len)
+            let ch = self.s[scan_pos];  // ch = hs->s[pos]
+            
+            if Self::h5_is_white(ch) {  // if (h5_is_white(ch))
+                self.set_token(TokenType::AttrName, start_pos, scan_pos - start_pos);
                 self.state_fn = Self::state_after_attribute_name;
+                self.pos = scan_pos + 1;  // hs->pos = pos + 1
                 return true;
-            } else if ch == b'/' {
-                self.set_token(TokenType::AttrName, start, self.pos - start);
-                self.advance();
+            } else if ch == b'/' {  // ch == CHAR_SLASH
+                self.set_token(TokenType::AttrName, start_pos, scan_pos - start_pos);
                 self.state_fn = Self::state_self_closing_start_tag;
+                self.pos = scan_pos + 1;  // hs->pos = pos + 1
                 return true;
-            } else if ch == b'=' {
-                self.set_token(TokenType::AttrName, start, self.pos - start);
-                self.advance();
+            } else if ch == b'=' {  // ch == CHAR_EQUALS
+                self.set_token(TokenType::AttrName, start_pos, scan_pos - start_pos);
                 self.state_fn = Self::state_before_attribute_value;
+                self.pos = scan_pos + 1;  // hs->pos = pos + 1
                 return true;
-            } else if ch == b'>' {
-                self.set_token(TokenType::AttrName, start, self.pos - start);
+            } else if ch == b'>' {  // ch == CHAR_GT
+                self.set_token(TokenType::AttrName, start_pos, scan_pos - start_pos);
                 self.state_fn = Self::state_emit_tag_close_char;
+                self.pos = scan_pos;  // hs->pos = pos (NOT pos + 1!)
                 return true;
             } else {
-                self.pos += 1;
+                scan_pos += 1;  // pos += 1
             }
         }
         
-        // EOF
-        self.set_token(TokenType::AttrName, start, self.len - start);
+        // EOF - match C lines 393-398 exactly
+        self.set_token(TokenType::AttrName, start_pos, self.len - start_pos);
         self.state_fn = Self::state_eof;
-        true
+        self.pos = self.len;  // hs->pos = hs->len
+        true  // return 1
     }
 
     fn state_after_attribute_name(&mut self) -> bool {
-        match self.skip_whitespace() {
-            None => false, // EOF
-            Some(b'/') => {
-                self.advance();
-                self.state_self_closing_start_tag()
+        // Match C implementation exactly line by line
+        match self.h5_skip_white() {  // c = h5_skip_white(hs)
+            None => false,  // case CHAR_EOF: return 0
+            Some(b'/') => {  // case CHAR_SLASH
+                self.pos += 1;  // hs->pos += 1
+                self.state_self_closing_start_tag()  // return h5_state_self_closing_start_tag(hs)
             }
-            Some(b'=') => {
-                self.advance();
-                self.state_before_attribute_value()
+            Some(b'=') => {  // case CHAR_EQUALS
+                self.pos += 1;  // hs->pos += 1
+                self.state_before_attribute_value()  // return h5_state_before_attribute_value(hs)
             }
-            Some(b'>') => {
-                self.state_emit_tag_close_char()
+            Some(b'>') => {  // case CHAR_GT
+                self.state_emit_tag_close_char()  // return h5_state_tag_name_close(hs)
             }
-            Some(_) => {
-                self.state_fn = Self::state_attribute_name;
-                self.next()
+            Some(_) => {  // default
+                self.state_attribute_name()  // return h5_state_attribute_name(hs)
             }
         }
     }

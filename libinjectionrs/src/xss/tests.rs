@@ -46,6 +46,22 @@ fn test_style_attribute() {
 }
 
 #[test]
+fn test_fuzz_differential_8ce9746b() {
+    // Fuzz test case where Rust returns true (XSS) but C returns false (safe)
+    // Input: "<p<p\n/`\u{2}\"`/\r</\r\r\r`/To/�C  >�\u{1}<p\n/`\u{2}\"`  >\u{1}<p>�}\r</\r</\r\r\r`` >�\u{1}<p\n/`\u{2}\"` \""
+    let input = &[
+        60, 112, 60, 112, 10, 47, 96, 2, 34, 96, 47, 13, 60, 47, 13, 13, 13, 96, 47, 84, 111, 
+        47, 255, 67, 32, 32, 62, 132, 1, 60, 112, 10, 47, 96, 2, 34, 96, 32, 32, 62, 1, 60, 
+        112, 62, 137, 125, 13, 60, 47, 13, 60, 47, 13, 13, 13, 96, 96, 32, 62, 132, 1, 60, 
+        112, 10, 47, 96, 2, 34, 96, 32, 34
+    ];
+    let detector = XssDetector::new();
+    // This test currently fails - Rust returns Xss but C returns Safe
+    // We expect it to return Safe to match C behavior
+    assert_eq!(detector.detect(input), XssResult::Safe);
+}
+
+#[test]
 fn test_dangerous_tags() {
     let detector = XssDetector::new();
     assert_eq!(detector.detect(b"<iframe src=\"http://evil.com\">"), XssResult::Xss);
