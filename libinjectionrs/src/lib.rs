@@ -82,7 +82,11 @@ impl fmt::Display for Error {
 impl StdError for Error {}
 
 pub fn detect_sqli(input: &[u8]) -> DetectionResult {
-    let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+    detect_sqli_with_flags(input, SqliFlags::FLAG_NONE)
+}
+
+pub fn detect_sqli_with_flags(input: &[u8], flags: SqliFlags) -> DetectionResult {
+    let mut state = SqliState::new(input, flags);
     let is_sqli = state.detect();
     let fp = state.get_fingerprint();
     

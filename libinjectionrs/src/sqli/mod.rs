@@ -193,13 +193,15 @@ impl<'a> SqliState<'a> {
             return false;
         }
         
-        // Test input "as-is"
-        self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0));
+        // Test input "as-is" with the current flags
+        // Note: preserve the original flags that were passed to the constructor
+        let original_flags = self.flags;
         let fingerprint = self.fingerprint();
         if self.check_is_sqli(&fingerprint) {
             return true;
         } else if self.reparse_as_mysql() {
-            self.reset(SqliFlags::new(SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_MYSQL.0));
+            // Only switch to MySQL mode if reparsing is needed
+            self.reset(SqliFlags::new(original_flags.0 | SqliFlags::FLAG_SQL_MYSQL.0));
             let fingerprint = self.fingerprint();
             if self.check_is_sqli(&fingerprint) {
                 return true;
