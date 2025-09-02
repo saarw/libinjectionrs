@@ -315,21 +315,24 @@ impl<'a> SqliTokenizer<'a> {
         // FIXED: This matches C's parse_string_core behavior exactly
         // C call: parse_string_core(s, slen, 0, current, flag2delim(sf->flags), 0);
         // Parameters: input, len, pos=0, token, delimiter, offset=0
+        // 
+        // IMPORTANT: Even when offset=0 (simulated quote), C still checks for escape sequences
+        // like double-delimiter ("") and backslash escapes. This is crucial for matching C behavior.
         
         let start_pos = self.pos; // Should be 0 for first token
         
-        // Find first occurrence of quote_char (like C's memchr call)
+        // Find first unescaped occurrence of quote_char (matching C's logic)
         let mut quote_pos = None;
         let mut search_pos = start_pos;
         
         while search_pos < self.input.len() {
             if self.input[search_pos] == quote_char {
-                // Check if this quote is escaped
+                // Check if this quote is escaped - C does this even for simulated quotes!
                 if self.is_double_delim_escaped(search_pos) {
                     // Skip escaped quote pair
                     search_pos += 2;
                     continue;
-                } else if search_pos > 0 && self.is_backslash_escaped(search_pos - 1) {
+                } else if search_pos > start_pos && self.is_backslash_escaped(search_pos - 1) {
                     // Skip backslash escaped quote
                     search_pos += 1;
                     continue;
@@ -338,9 +341,8 @@ impl<'a> SqliTokenizer<'a> {
                     quote_pos = Some(search_pos);
                     break;
                 }
-            } else {
-                search_pos += 1;
             }
+            search_pos += 1;
         }
         
         // Set string open/close info like C does

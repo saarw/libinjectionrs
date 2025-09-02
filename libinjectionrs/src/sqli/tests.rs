@@ -171,6 +171,48 @@ mod tests {
     }
 
     #[test]
+    fn test_fuzz_input_with_quote_double() {
+        let input = b"\xd8$\xff*\"\"\x1c\"\"2`";
+        
+        // Test with FLAG_QUOTE_DOUBLE | FLAG_SQL_MYSQL
+        let mut state = SqliState::new(input, SqliFlags::new(
+            SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_MYSQL.0
+        ));
+        
+        let fingerprint = state.get_fingerprint();
+        
+        // The C implementation returns "s" for this input with these flags
+        assert_eq!(fingerprint.as_str(), "s", "Expected fingerprint 's' but got '{}'", fingerprint.as_str());
+    }
+    
+    #[test]
+    fn test_fuzz_input_with_detect() {
+        let input = b"\xd8$\xff*\"\"\x1c\"\"2`";
+        
+        // First check what fingerprints we get with different flags
+        let mut state1 = SqliState::new(input, SqliFlags::new(
+            SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0
+        ));
+        let fp1 = state1.get_fingerprint();
+        println!("FLAG_QUOTE_NONE | FLAG_SQL_ANSI: {}", fp1);
+        println!("  Is blacklisted: {}", blacklist::is_blacklisted(fp1.as_str()));
+        
+        let mut state2 = SqliState::new(input, SqliFlags::new(
+            SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_MYSQL.0
+        ));
+        let fp2 = state2.get_fingerprint();
+        println!("FLAG_QUOTE_DOUBLE | FLAG_SQL_MYSQL: {}", fp2);
+        println!("  Is blacklisted: {}", blacklist::is_blacklisted(fp2.as_str()));
+        
+        // Test using detect() which should try multiple flag combinations
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let is_sqli = state.detect();
+        
+        // The C implementation returns false for this input
+        assert!(!is_sqli, "Expected detect() to return false but got true");
+    }
+    
+    #[test]
     fn test_quote_context_differential_fuzzing_case() {
         // Test for the specific input that caused differential fuzzing failure
         // Input: [35, 254, 34, 126, 34] which is "#\xfe\"~\""
@@ -412,5 +454,85 @@ mod tests {
         
         // The detect() method should find SQL injection after MySQL reparse
         assert!(is_sqli, "detect() should return true after MySQL reparse");
+    }
+    
+    #[test]
+    fn test_php_backquote_comment_fuzz_case() {
+        // Test the PHP backquote comment conversion that was missing
+        // This test specifically targets the case where a backtick creates an empty
+        // bareword token that should be converted to a comment during folding
+        
+        // Simple test case: "1 OR 1`" - backtick at end creates empty bareword
+        let input = b"1 OR 1`";
+        
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let fingerprint = state.get_fingerprint();
+        
+        println!("PHP backquote comment test:");
+        println!("  Input: '{}'", core::str::from_utf8(input).unwrap());
+        println!("  Fingerprint: '{}'", fingerprint.as_str());
+        println!("  Token count: {}", state.tokens.len());
+        
+        // Examine tokens
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Token {}: type={:?}, val='{}', str_open=0x{:02x}, len={}, str_close=0x{:02x}",
+                     i, token.token_type, token.value_as_str(), 
+                     token.str_open, token.len, token.str_close);
+        }
+        
+        // The last token should be a comment (PHP backquote comment conversion)
+        if let Some(last_token) = state.tokens.last() {
+            assert_eq!(last_token.token_type, TokenType::Comment,
+                      "Last token should be converted to Comment for PHP backquote");
+        }
+        
+        // The fingerprint should be "1&1c" - number, logic operator, number, comment
+        assert_eq!(fingerprint.as_str(), "1&1c", 
+                   "Fingerprint should be '1&1c' for PHP backquote comment, got: '{}'", 
+                   fingerprint.as_str());
+        
+        // Now test with the original fuzz input to ensure it doesn't crash
+        let fuzz_input = &[0xd8, 0x24, 0xff, 0x2a, 0x22, 0x22, 0x1c, 0x22, 0x22, 0x32, 0x60];
+        let mut state = SqliState::new(fuzz_input, SqliFlags::FLAG_SQL_ANSI);
+        let _is_sqli = state.detect(); // Just ensure it doesn't crash
+    }
+    
+    #[test]
+    fn test_original_fuzz_differential_input() {
+        // Test the exact fuzz input that revealed the differential
+        // Input bytes: \xd8$\xff*""\x1c""2`
+        let input = &[0xd8, 0x24, 0xff, 0x2a, 0x22, 0x22, 0x1c, 0x22, 0x22, 0x32, 0x60];
+        
+        // Test with FLAG_QUOTE_DOUBLE as used in the original fuzz test
+        let flags = SqliFlags::new(
+            SqliFlags::FLAG_QUOTE_DOUBLE.0 | SqliFlags::FLAG_SQL_MYSQL.0
+        );
+        let mut state = SqliState::new(input, flags);
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.fingerprint();
+        
+        println!("Original fuzz input test (FLAG_QUOTE_DOUBLE | FLAG_SQL_MYSQL):");
+        println!("  Input bytes: {:?}", input);
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        
+        // The C implementation returns false for this input
+        // After our fix, Rust should also return false
+        assert!(!is_sqli_rust, "Should not detect as SQL injection (matching C behavior)");
+        
+        // Also test with FLAG_QUOTE_NONE | FLAG_SQL_ANSI combination
+        let flags = SqliFlags::new(
+            SqliFlags::FLAG_QUOTE_NONE.0 | SqliFlags::FLAG_SQL_ANSI.0
+        );
+        let mut state = SqliState::new(input, flags);
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.fingerprint();
+        
+        println!("\nOriginal fuzz input test (FLAG_QUOTE_NONE | FLAG_SQL_ANSI):");
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        
+        // Both flag combinations should not detect SQL injection
+        assert!(!is_sqli_rust, "Should not detect as SQL injection with FLAG_QUOTE_NONE");
     }
 }
