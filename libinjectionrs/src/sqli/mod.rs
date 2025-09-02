@@ -122,15 +122,15 @@ pub struct SqliState<'a> {
     current_token: Option<Token>,
     
     // The fingerprint
-    fingerprint: [u8; 8],
+    pub fingerprint: [u8; 8],
     
     // Various statistics
-    stats_comment_ddw: i32,
-    stats_comment_ddx: i32,
-    stats_comment_c: i32,
-    stats_comment_hash: i32,
+    pub stats_comment_ddw: i32,
+    pub stats_comment_ddx: i32,
+    pub stats_comment_c: i32,
+    pub stats_comment_hash: i32,
     stats_folds: usize,
-    stats_tokens: usize,
+    pub stats_tokens: usize,
     
     // Reason for SQLi detection (for debugging)
     reason: u32,
@@ -1205,6 +1205,7 @@ impl<'a> SqliState<'a> {
             .unwrap_or("")
             .trim_end_matches('\0');
             
+            
         if self.tokens.len() < 2 {
             return true;
         }
@@ -1230,6 +1231,7 @@ impl<'a> SqliState<'a> {
         
         // For fingerprint like 'nc', only comments of /* are treated as SQL
         // ending comments of "--" and "#" are not SQLi
+        // Reference: libinjection_sqli.c:2084-2087
         if self.tokens[0].token_type == TokenType::Bareword &&
            self.tokens[1].token_type == TokenType::Comment &&
            self.tokens[1].val[0] != b'/' {
@@ -1237,6 +1239,7 @@ impl<'a> SqliState<'a> {
         }
         
         // If '1c' ends with '/*' then it's SQLi
+        // Reference: libinjection_sqli.c:2059-2066
         if self.tokens[0].token_type == TokenType::Number &&
            self.tokens[1].token_type == TokenType::Comment &&
            self.tokens[1].val[0] == b'/' {
@@ -1244,16 +1247,26 @@ impl<'a> SqliState<'a> {
         }
         
         // Handle number followed by comment
+        // Reference: libinjection_sqli.c:2115-2116
         if self.tokens[0].token_type == TokenType::Number &&
            self.tokens[1].token_type == TokenType::Comment {
             
             if self.stats_tokens > 2 {
                 // We have some folding going on, highly likely SQLi
+                // Reference: libinjection_sqli.c:2117-2120
                 return true;
             }
             
             // Check that next character after the number is whitespace, '/' or '-'
-            let token0_end = self.tokens[0].pos + self.tokens[0].len;
+            // 
+            // COMPATIBILITY BUG: The original C code has a bug at libinjection_sqli.c:2126
+            // where it uses `sql_state->s[sql_state->tokenvec[0].len]` instead of 
+            // `sql_state->s[sql_state->tokenvec[0].pos + sql_state->tokenvec[0].len]`
+            // This causes incorrect position calculation when the first token doesn't start at position 0.
+            // We replicate this bug for exact C compatibility, though the correct logic would be:
+            // let token0_end = self.tokens[0].pos + self.tokens[0].len;
+            let token0_end = self.tokens[0].len;  // BUG: Should be pos + len, matches C bug
+            
             if token0_end < self.input.len() {
                 let ch = self.input[token0_end];
                 
@@ -1277,12 +1290,13 @@ impl<'a> SqliState<'a> {
         }
         
         // Detect obvious SQLi scans - only if comment is longer than "--"
-        // and starts with '-'
-        if self.tokens[1].token_type == TokenType::Comment &&
-           self.tokens[1].len > 2 && self.tokens[1].val[0] == b'-' {
+        // so only detect if input ends with '--', e.g. 1-- but not 1-- foo
+        // This matches C code at libinjection_sqli.c:2151-2155
+        if self.tokens[1].len > 2 && self.tokens[1].val[0] == b'-' {
             return false;
         }
         
+        // Default return for case 2 (matches C break statement)
         true
     }
     
@@ -1346,7 +1360,7 @@ impl<'a> SqliState<'a> {
 pub use tokenizer::{Token, TokenType, SqliTokenizer};
 
 mod tokenizer;
-mod blacklist;
+pub mod blacklist;
 pub mod sqli_data;
 
 // Import CHAR_NULL for internal use

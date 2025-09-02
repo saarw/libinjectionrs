@@ -582,4 +582,56 @@ mod tests {
                  Input: $8--\\xff)\\xff\\x03\\xff), C: true, Rust: {}", 
                 is_sqli_rust);
     }
+
+    #[test]
+    fn test_fuzz_differential_whitelist_bug() {
+        // Test case for fuzz input that revealed a C whitelist bug
+        // Input: [27, 56, 45, 45] which is "\x1b8--"
+        // This test verifies that the Rust implementation replicates the C bug for compatibility
+        // 
+        // Background: The C code has a bug at libinjection_sqli.c:2126 where it calculates
+        // the character position incorrectly, using tokenvec[0].len instead of 
+        // tokenvec[0].pos + tokenvec[0].len. This causes it to check the wrong character
+        // and return false when it should return true.
+        //
+        // The bug is intentionally replicated in Rust for exact C compatibility.
+        let input = &[27u8, 56, 45, 45]; // "\x1b8--"
+        
+        println!("=== Fuzz Differential Whitelist Bug Test ===");
+        println!("Input bytes: {:?}", input);
+        println!("Input hex: {}", input.iter().map(|b| format!("{:02x}", b)).collect::<String>());
+        
+        // Test with detect() method to ensure single tokenization pass
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let is_sqli = state.detect();
+        let fingerprint = std::str::from_utf8(&state.fingerprint)
+            .unwrap_or("")
+            .trim_end_matches('\0');
+        
+        println!("Rust fingerprint: '{}'", fingerprint);
+        println!("Rust detection: {}", is_sqli);
+        println!("Rust stats_tokens: {}", state.stats_tokens);
+        
+        // Both C and Rust should produce the same results due to bug compatibility:
+        // - Fingerprint: "1c" (number + comment)
+        // - stats_tokens: 2 (not > 2, so no early exit)
+        // - Detection result: false (due to C bug - checks wrong character position)
+        assert_eq!(fingerprint, "1c", "Should produce '1c' fingerprint (number + comment)");
+        assert_eq!(state.stats_tokens, 2, "Should have stats_tokens = 2 (single tokenization pass)");
+        assert_eq!(is_sqli, false, "Should return false due to C bug compatibility");
+        
+        // Verify the token structure matches expectations
+        assert_eq!(state.tokens.len(), 2, "Should have exactly 2 tokens");
+        assert_eq!(state.tokens[0].token_type, TokenType::Number, "First token should be Number");
+        assert_eq!(state.tokens[0].value_as_str(), "8", "First token value should be '8'");
+        assert_eq!(state.tokens[0].pos, 1, "First token should start at position 1 (after \\x1b)");
+        assert_eq!(state.tokens[0].len, 1, "First token should have length 1");
+        
+        assert_eq!(state.tokens[1].token_type, TokenType::Comment, "Second token should be Comment");
+        assert_eq!(state.tokens[1].value_as_str(), "--", "Second token value should be '--'");
+        assert_eq!(state.tokens[1].pos, 2, "Second token should start at position 2");
+        assert_eq!(state.tokens[1].len, 2, "Second token should have length 2");
+        
+        println!("✅ C bug compatibility verified - input correctly returns false despite being SQLi");
+    }
 }
