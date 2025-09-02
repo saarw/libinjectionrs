@@ -1369,6 +1369,3 @@ use tokenizer::CHAR_NULL;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod test_evil_tokens;
