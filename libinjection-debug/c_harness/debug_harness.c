@@ -40,18 +40,35 @@ const char *token_type_to_string(char type) {
 }
 
 const char *char_type_to_string(unsigned char ch) {
-    // This would map to the C character dispatch table
-    // For now, provide basic mapping
-    if (ch >= 'a' && ch <= 'z') return "WORD";
-    if (ch >= 'A' && ch <= 'Z') return "WORD"; 
-    if (ch >= '0' && ch <= '9') return "NUMBER";
-    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') return "WHITE";
-    if (ch == '\'') return "STRING";
-    if (ch == '"') return "STRING";
-    if (ch == '`') return "TICK";
-    if (ch == '#') return "HASH";
-    if (ch == '@') return "VARIABLE";
-    return "OTHER";
+    // Use the actual libinjection character dispatch table
+    extern const pt2Function char_parse_map[];
+    pt2Function parser = char_parse_map[ch];
+    
+    // Map parser functions to human-readable names
+    if (parser == &parse_white) return "WHITE";
+    if (parser == &parse_hash) return "HASH";
+    if (parser == &parse_string) return "STRING";
+    if (parser == &parse_tick) return "TICK";
+    if (parser == &parse_var) return "VARIABLE";
+    if (parser == &parse_word) return "WORD";
+    if (parser == &parse_bword) return "BWORD";
+    if (parser == &parse_number) return "NUMBER";
+    if (parser == &parse_operator1) return "OP1";
+    if (parser == &parse_operator2) return "OP2";
+    if (parser == &parse_char) return "LEFTPARENS";
+    if (parser == &parse_dash) return "DASH";
+    if (parser == &parse_slash) return "SLASH";
+    if (parser == &parse_backslash) return "BACKSLASH";
+    if (parser == &parse_money) return "MONEY";
+    if (parser == &parse_ustring) return "USTRING";
+    if (parser == &parse_qstring) return "QSTRING";
+    if (parser == &parse_nqstring) return "NQSTRING";
+    if (parser == &parse_xstring) return "XSTRING";
+    if (parser == &parse_bstring) return "BSTRING";
+    if (parser == &parse_estring) return "ESTRING";
+    if (parser == &parse_other) return "OTHER";
+    
+    return "UNKNOWN";
 }
 
 void debug_raw_tokenization(const unsigned char* input, size_t len) {
