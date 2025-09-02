@@ -669,4 +669,35 @@ mod tests {
         
         println!("✅ Fuzz differential fixed - Evil tokens now contribute to SQL injection detection");
     }
+
+    #[test]
+    fn test_fuzz_differential_crash_dd7a369a() {
+        // Test case for fuzz differential crash-dd7a369aa6802688b7158b456ca6284a0263c7f1
+        // Input: "\\*\\\\As@\\\\\\�!!�!\\!44!4���!��1j�!@+*!+"
+        // Bytes: [92, 42, 92, 92, 65, 115, 64, 92, 92, 92, 208, 33, 33, 208, 33, 92, 33, 52, 52, 33, 52, 255, 255, 255, 33, 255, 255, 49, 106, 255, 33, 64, 43, 42, 33, 43]
+        // Expected: Rust should return the same as C (C returns false, Rust currently returns true)
+        let input = [
+            92, 42, 92, 92, 65, 115, 64, 92, 92, 92, 208, 33, 33, 208, 33, 92, 33, 
+            52, 52, 33, 52, 255, 255, 255, 33, 255, 255, 49, 106, 255, 33, 64, 43, 42, 33, 43
+        ];
+        
+        // Test with detect() method (as used in the fuzz test)
+        let mut state = SqliState::new(&input, SqliFlags::FLAG_NONE);
+        let is_sqli_rust = state.detect();
+        let fingerprint_rust = state.get_fingerprint();
+        
+        println!("Fuzz differential test crash-dd7a369a:");
+        println!("  Input bytes: {:?}", input);
+        println!("  Input string (lossy): {:?}", String::from_utf8_lossy(&input));
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        println!("  Expected (C) detection: false");
+        
+        // The C implementation returns false for this input
+        // Rust should match this behavior exactly
+        assert_eq!(is_sqli_rust, false, 
+                   "Rust should match C behavior - expected false but got {}. \
+                    This is a known differential that needs to be fixed.", 
+                   is_sqli_rust);
+    }
 }
