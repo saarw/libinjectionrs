@@ -110,3 +110,23 @@ fn test_multiple_contexts() {
     // For now, let's just check it doesn't crash - raw URLs without HTML context 
     // may not always be detected depending on parsing context
 }
+
+#[test]
+fn test_fuzz_differential_crash_472cde1c() {
+    // Fuzz test case where Rust returns true (XSS) but C returns false (safe)  
+    // From fuzz crash: crash-472cde1c76cb772c42c53bf83e5bfe071f009983
+    // Input bytes: [47, 93, 34, 47, 93, 34, 96, 214, 45, 53, 32, 47, 62, 60, 116, 255, 102, 102, 102, 102, 39, 96, 10, 39, 10, 90, 127, 60, 112, 10, 120, 96, 170, 84, 40, 47, 60, 39, 61, 255, 62, 96, 47, 60, 33, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 61, 39, 212, 61, 61, 39, 13, 116, 255, 255, 255, 255, 255, 255, 255, 255, 255, 102, 102, 102, 102, 102, 255, 52, 39, 167, 1, 61, 96, 96, 47, 13, 96, 39, 45, 53, 32, 47, 62, 60, 116, 255, 102, 102, 102, 102, 102, 91, 102, 96, 102, 102, 102, 39, 167, 1, 61, 96, 96, 47, 13]
+    let input = &[
+        47, 93, 34, 47, 93, 34, 96, 214, 45, 53, 32, 47, 62, 60, 116, 255, 102, 102, 102, 102, 
+        39, 96, 10, 39, 10, 90, 127, 60, 112, 10, 120, 96, 170, 84, 40, 47, 60, 39, 61, 255, 
+        62, 96, 47, 60, 33, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 105, 
+        105, 105, 105, 61, 39, 212, 61, 61, 39, 13, 116, 255, 255, 255, 255, 255, 255, 255, 
+        255, 255, 102, 102, 102, 102, 102, 255, 52, 39, 167, 1, 61, 96, 96, 47, 13, 96, 39, 
+        45, 53, 32, 47, 62, 60, 116, 255, 102, 102, 102, 102, 102, 91, 102, 96, 102, 102, 102, 
+        39, 167, 1, 61, 96, 96, 47, 13
+    ];
+    let detector = XssDetector::new();
+    // This test currently fails - Rust returns Xss but C returns Safe
+    // We expect it to return Safe to match C behavior
+    assert_eq!(detector.detect(input), XssResult::Safe);
+}
