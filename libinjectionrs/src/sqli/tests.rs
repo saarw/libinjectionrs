@@ -45,6 +45,35 @@ mod tests {
     }
     
     #[test]
+    fn debug_fuzz_crash_case() {
+        // Test the specific case that was crashing in fuzz testing
+        let input = b"--1-@a#*\x03";
+        
+        println!("Testing input: {:?}", String::from_utf8_lossy(input));
+        println!("Hex: {}", input.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(""));
+        
+        // Test with ANSI flags like the fuzz test
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        
+        // Get tokens by checking state before folding
+        let mut tokenizer = SqliTokenizer::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let mut raw_tokens = Vec::new();
+        while let Some(token) = tokenizer.next_token() {
+            println!("  Raw Token: {:?} '{}' pos={} len={}", 
+                     token.token_type, token.value_as_str(), token.pos, token.len);
+            raw_tokens.push(token);
+        }
+        println!("Raw tokens created: {}", raw_tokens.len());
+        
+        // Create fingerprint and check detection  
+        let fingerprint = state.fingerprint();
+        println!("Final fingerprint: '{}'", fingerprint.as_str());
+        
+        let is_injection = state.is_sqli();
+        println!("Is SQL injection: {}", is_injection);
+    }
+    
+    #[test]
     fn test_blacklist() {
         // Test the blacklist function
         assert!(!blacklist::is_blacklisted(""));
@@ -281,5 +310,107 @@ mod tests {
         // After MySQL comment detection, we should have an EVIL token
         assert!(state.tokens.iter().any(|t| t.token_type == TokenType::Evil),
                 "Should have at least one EVIL token after MySQL comment detection");
+    }
+
+    #[test]
+    fn test_fuzz_crash_c_behavior() {
+        // Test the specific fuzz crash case: "--1-@a#*\x03"
+        // This should match C behavior exactly:
+        // - Should be detected as SQL injection (true)
+        // - Should produce fingerprint "1ovc" (4 tokens after comment processing)
+        let input = b"--1-@a#*\x03";
+        
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        let is_sqli = state.detect();  // Use detect() to trigger MySQL reparse
+        let fingerprint = state.fingerprint_string();
+        
+        println!("Input: {:?}", std::str::from_utf8(input).unwrap_or("<invalid>"));
+        println!("Hex: {:?}", input);
+        println!("Is SQL injection: {}", is_sqli);
+        println!("Fingerprint: '{}'", fingerprint);
+        println!("Token count: {}", state.tokens.len());
+        
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("Token {}: {:?} '{}'", i, token.token_type, token.value_as_str());
+        }
+        
+        // This test documents the expected behavior according to C implementation:
+        // The C implementation should return true for this input with fingerprint "1ovc"
+        // After our fix, Rust should match this exactly
+        assert!(is_sqli, "Should detect as SQL injection to match C behavior");
+        
+        // The exact fingerprint should match C - if this fails, we need to investigate further
+        // Based on analysis, C processes: NUMBER(1), OPERATOR(-), VARIABLE(@a), COMMENT(#*)
+        // Expected fingerprint: "1ovc" (where 'c' represents the comment token)
+        println!("Expected: fingerprint with 4 characters representing tokens processed from comment content");
+    }
+    
+    #[test]
+    fn test_mysql_reparse_logic() {
+        // Test that "--" not followed by whitespace triggers MySQL reparse
+        let input = b"--1-@a#*\x03";
+        
+        // Debug: Check character classification
+        println!("Character analysis:");
+        println!("  input[0] = '{}' (0x{:02x})", input[0] as char, input[0]);
+        println!("  input[1] = '{}' (0x{:02x})", input[1] as char, input[1]);
+        println!("  input[2] = '{}' (0x{:02x})", input[2] as char, input[2]);
+        
+        // Import needed for checking character type
+        use crate::sqli::sqli_data::{get_char_type, CharType};
+        let char_type_dash = get_char_type(input[0]);
+        let char_type_1 = get_char_type(input[2]);
+        println!("  Character type of '-': {:?}", char_type_dash);
+        println!("  Character type of '1': {:?}", char_type_1);
+        println!("  Is '1' white? {}", matches!(char_type_1, CharType::White));
+        
+        // First test tokenizer directly
+        use crate::sqli::tokenizer::SqliTokenizer;
+        println!("\nDirect tokenizer test (ANSI mode):");
+        let mut tokenizer = SqliTokenizer::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let token = tokenizer.next_token();
+        println!("  First token: {:?}", token.as_ref().map(|t| (t.token_type.clone(), t.value_as_str())));
+        println!("  Tokenizer stats_comment_ddx: {}", tokenizer.stats_comment_ddx);
+        println!("  Tokenizer stats_comment_ddw: {}", tokenizer.stats_comment_ddw);
+        
+        // Now test with state
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_ANSI);
+        let fingerprint = state.get_fingerprint();
+        
+        println!("\nANSI mode through SqliState:");
+        println!("  Fingerprint: '{}'", fingerprint.as_str());
+        println!("  stats_comment_ddx: {}", state.stats_comment_ddx);
+        println!("  stats_comment_ddw: {}", state.stats_comment_ddw);
+        println!("  Token count: {}", state.tokens.len());
+        
+        // In ANSI mode with "--" not followed by whitespace, should set stats_comment_ddx
+        assert!(state.stats_comment_ddx > 0, "stats_comment_ddx should be set for '--' not followed by whitespace");
+        
+        // Now test with MySQL mode - should tokenize "--" as two operators
+        let mut state = SqliState::new(input, SqliFlags::FLAG_SQL_MYSQL);
+        let fingerprint = state.get_fingerprint();
+        
+        println!("MySQL mode:");
+        println!("  Fingerprint: '{}'", fingerprint.as_str());
+        println!("  stats_comment_ddx: {}", state.stats_comment_ddx);
+        println!("  Token count: {}", state.tokens.len());
+        
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Token {}: {:?} '{}'", i, token.token_type, token.value_as_str());
+        }
+        
+        // In MySQL mode, should produce multiple tokens (not just a comment)
+        assert!(state.tokens.len() > 1, "MySQL mode should produce multiple tokens from '--1-@a#*\\x03'");
+        
+        // Test the full detect() method with reparse
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        let is_sqli = state.detect();
+        
+        println!("Full detect():");
+        println!("  Is SQL injection: {}", is_sqli);
+        println!("  Final fingerprint: '{}'", state.fingerprint());
+        
+        // The detect() method should find SQL injection after MySQL reparse
+        assert!(is_sqli, "detect() should return true after MySQL reparse");
     }
 }

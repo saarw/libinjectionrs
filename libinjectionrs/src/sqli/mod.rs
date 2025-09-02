@@ -327,7 +327,8 @@ impl<'a> SqliState<'a> {
         let mut left = 0usize;
         let mut more = true;
         
-        // Skip all initial comments, right-parens and unary operators
+        // Phase 1: Skip all initial comments, right-parens and unary operators (matches C lines 1366-1386)
+        // This matches C's initial phase exactly - put tokens in tokenvec[0] and skip unwanted ones
         while more {
             if let Some(token) = tokenizer.next_token() {
                 // Count all tokens processed for stats_tokens
@@ -338,20 +339,25 @@ impl<'a> SqliState<'a> {
                      token.token_type == TokenType::LeftParenthesis ||
                      token.token_type == TokenType::SqlType ||
                      self.is_unary_op(&token)) {
-                    // Found a real token, keep it
+                    // Found a real token, keep it at position 0
                     break;
                 }
-                // Otherwise continue skipping
+                // Otherwise continue skipping - comments are ignored in this phase
             } else {
                 more = false;
             }
         }
         
         if !more {
-            // If input was only comments, unary or (, then exit
+            // If input was only comments, unary or (, then exit (matches C lines 1380-1382)
+            // But first copy tokenizer statistics so they're available for reparse detection
+            self.stats_comment_c = tokenizer.stats_comment_c;
+            self.stats_comment_ddw = tokenizer.stats_comment_ddw;
+            self.stats_comment_ddx = tokenizer.stats_comment_ddx;
+            self.stats_comment_hash = tokenizer.stats_comment_hash;
             return 0;
         } else {
-            // it's some other token
+            // it's some other token - first real token is now at position 0
             pos = 1;
         }
         
@@ -881,11 +887,6 @@ impl<'a> SqliState<'a> {
             left += 1;
         }
         
-        // If we have 4 or less tokens, and we had a comment token at the end, add it back
-        if left < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
-            self.token_vec[left] = last_comment;
-            left += 1;
-        }
         
         // Sometimes we grab a 6th token to help determine the type of token 5
         if left > LIBINJECTION_SQLI_MAX_TOKENS {
@@ -903,6 +904,13 @@ impl<'a> SqliState<'a> {
         self.stats_comment_ddw = tokenizer.stats_comment_ddw;
         self.stats_comment_ddx = tokenizer.stats_comment_ddx;
         self.stats_comment_hash = tokenizer.stats_comment_hash;
+        
+        // Add last comment back to token array if there's space (matches C lines 1873-1877)
+        if left < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
+            self.token_vec[left] = last_comment.clone();
+            self.tokens.push(last_comment);
+            left += 1;
+        }
         
         left
     }
@@ -1287,7 +1295,7 @@ pub use tokenizer::{Token, TokenType, SqliTokenizer};
 
 mod tokenizer;
 mod blacklist;
-mod sqli_data;
+pub mod sqli_data;
 
 // Import CHAR_NULL for internal use
 use tokenizer::CHAR_NULL;
