@@ -314,56 +314,105 @@ impl<'a> SqliTokenizer<'a> {
     }
     
     fn parse_first_token_with_quote_context(&mut self, quote_char: u8) -> Option<Token> {
-        // FIXED: This matches C's parse_string_core behavior exactly
-        // C call: parse_string_core(s, slen, 0, current, flag2delim(sf->flags), 0);
-        // Parameters: input, len, pos=0, token, delimiter, offset=0
-        // 
-        // IMPORTANT: Even when offset=0 (simulated quote), C still checks for escape sequences
-        // like double-delimiter ("") and backslash escapes. This is crucial for matching C behavior.
+        // FIXED: Implements exact C behavior from libinjection_sqli.c parse_string_core function
+        // Called from libinjection_sqli.c:1216: parse_string_core(s, slen, 0, current, flag2delim(sf->flags), 0)
+        // This handles FLAG_QUOTE_DOUBLE context where input is treated as if starting with a quote
         
         let start_pos = self.pos; // Should be 0 for first token
+        let len = self.input.len();
+        let pos = start_pos; // 0 for first token
+        let offset = 0; // simulated quote (libinjection_sqli.c:624 comment explains offset parameter)
         
-        // Find first unescaped occurrence of quote_char (matching C's logic)
-        let mut quote_pos = None;
-        let mut search_pos = start_pos;
+        // Step 1: Find first quote occurrence
+        // From libinjection_sqli.c:627-628: memchr(cs + pos + offset, delim, len - pos - offset)
+        let search_start = pos + offset;
+        let search_len = len - pos - offset;
         
-        while search_pos < self.input.len() {
-            if self.input[search_pos] == quote_char {
-                // Check if this quote is escaped - C does this even for simulated quotes!
-                if self.is_double_delim_escaped(search_pos) {
-                    // Skip escaped quote pair
-                    search_pos += 2;
-                    continue;
-                } else if search_pos > start_pos && self.is_backslash_escaped(search_pos - 1) {
-                    // Skip backslash escaped quote
-                    search_pos += 1;
-                    continue;
-                } else {
-                    // Found unescaped quote
-                    quote_pos = Some(search_pos);
-                    break;
-                }
+        let mut qpos_idx = None;
+        for i in search_start..(search_start + search_len) {
+            if self.input[i] == quote_char {
+                qpos_idx = Some(i);
+                break;
             }
-            search_pos += 1;
         }
         
-        // Set string open/close info like C does
-        // offset = 0 means simulated quote, so str_open = CHAR_NULL
+        // From libinjection_sqli.c:638-643: Set str_open based on offset
+        // offset = 0 means "simulated quote", so str_open = CHAR_NULL
         self.current.str_open = CHAR_NULL;
         
-        if let Some(end_pos) = quote_pos {
-            // Found closing quote - parse up to that point
-            let content = &self.input[start_pos..end_pos];
-            self.current.assign(TYPE_STRING, start_pos, end_pos - start_pos, content);
-            self.current.str_close = quote_char;
-            self.pos = end_pos + 1; // Skip the closing quote
-        } else {
-            // No closing quote found - parse entire remaining input
-            let content = &self.input[start_pos..];
-            self.current.assign(TYPE_STRING, start_pos, self.input.len() - start_pos, content);
-            self.current.str_close = CHAR_NULL;
-            self.pos = self.input.len();
+        // Main parsing loop from libinjection_sqli.c:645-672
+        while let Some(qpos) = qpos_idx {
+            // Check backslash escape - libinjection_sqli.c:655
+            // C: is_backslash_escaped(qpos - 1, cs + pos + offset)
+            if qpos > pos + offset {
+                let check_pos = qpos - 1;
+                let start_pos_for_escape = pos + offset;
+                
+                // Implement libinjection_sqli.c:586-606 is_backslash_escaped function exactly
+                let mut backslash_count = 0;
+                let mut ptr = check_pos;
+                
+                // libinjection_sqli.c:600-604: Count consecutive backslashes backwards
+                loop {
+                    if ptr < start_pos_for_escape || self.input[ptr] != b'\\' {
+                        break;
+                    }
+                    backslash_count += 1;
+                    if ptr == 0 {
+                        break;
+                    }
+                    ptr -= 1;
+                }
+                
+                // libinjection_sqli.c:605-606: If odd number of backslashes, it's escaped
+                if backslash_count & 1 == 1 {
+                    // libinjection_sqli.c:656-659: Continue search from qpos + 1
+                    qpos_idx = None;
+                    for i in (qpos + 1)..len {
+                        if self.input[i] == quote_char {
+                            qpos_idx = Some(i);
+                            break;
+                        }
+                    }
+                    continue;
+                }
+            }
+            
+            // Check double delimiter escape - libinjection_sqli.c:660
+            // C: is_double_delim_escaped(qpos, cs + len)
+            // Implements libinjection_sqli.c:610-612: ((cur + 1) < end) && *(cur + 1) == *cur
+            if qpos + 1 < len && self.input[qpos + 1] == quote_char {
+                // libinjection_sqli.c:661-664: Continue search from qpos + 2
+                qpos_idx = None;
+                for i in (qpos + 2)..len {
+                    if self.input[i] == quote_char {
+                        qpos_idx = Some(i);
+                        break;
+                    }
+                }
+                continue;
+            }
+            
+            // Found unescaped quote - libinjection_sqli.c:666-670
+            // C: st_assign(st, TYPE_STRING, pos + offset, qpos - (cs + pos + offset), cs + pos + offset)
+            let content_start = pos + offset;
+            let content_len = qpos - content_start;
+            let content = &self.input[content_start..(content_start + content_len)];
+            
+            self.current.assign(TYPE_STRING, content_start, content_len, content);
+            self.current.str_close = quote_char; // libinjection_sqli.c:669
+            
+            // libinjection_sqli.c:670: return (size_t)(qpos - cs + 1)
+            self.pos = qpos + 1;
+            return Some(self.current.clone());
         }
+        
+        // No closing quote found - libinjection_sqli.c:646-654
+        // C: st_assign(st, TYPE_STRING, pos + offset, len - pos - offset, cs + pos + offset)
+        let content = &self.input[start_pos..];
+        self.current.assign(TYPE_STRING, start_pos, self.input.len() - start_pos, content);
+        self.current.str_close = CHAR_NULL; // libinjection_sqli.c:653
+        self.pos = self.input.len(); // libinjection_sqli.c:654: return len
         
         Some(self.current.clone())
     }

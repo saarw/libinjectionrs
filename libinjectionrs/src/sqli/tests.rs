@@ -700,4 +700,83 @@ mod tests {
                     This is a known differential that needs to be fixed.", 
                    is_sqli_rust);
     }
+
+    #[test]
+    fn test_fuzz_differential_d1ff5132() {
+        // Test case for fuzz differential crash-d1ff5132943f80b0749a49c160171e4663c2559f
+        // Input: "$8\\\"\">\"\"\"" 
+        // Bytes: [36, 56, 92, 34, 34, 62, 34, 34, 34]
+        // Expected: Rust should return the same as C (C returns true, Rust currently returns false)
+        let input = b"$8\\\"\">\"\"\"";
+        
+        println!("=== Detailed Rust Analysis ===");
+        println!("Input bytes: {:?}", input);
+        println!("Input as string: {:?}", String::from_utf8_lossy(input));
+        
+        // Test raw tokenization first
+        println!("\n=== Raw Tokenization ===");
+        let mut tokenizer = SqliTokenizer::new(input, SqliFlags::FLAG_NONE);
+        let mut token_count = 0;
+        while let Some(token) = tokenizer.next_token() {
+            println!("Raw Token {}: type={:?}, val='{}', pos={}, len={}", 
+                     token_count, token.token_type, token.value_as_str(), token.pos, token.len);
+            token_count += 1;
+            if token_count >= 10 {
+                println!("  (stopping at 10 tokens)");
+                break;
+            }
+        }
+        
+        // Test with detect() method (as used in the fuzz test)
+        let mut state = SqliState::new(input, SqliFlags::FLAG_NONE);
+        
+        // Debug the folding process
+        println!("\n=== Folding Process Debug ===");
+        let token_count = state.fold_tokens();
+        println!("Folded token count: {}", token_count);
+        println!("Tokens after folding:");
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Folded Token {}: type={:?}, val='{}', pos={}, len={}", 
+                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+        }
+        
+        // Get fingerprint directly and check if it matches C
+        let fingerprint_rust = state.get_fingerprint();
+        println!("After get_fingerprint(), tokens changed to:");
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Final Token {}: type={:?}, val='{}', pos={}, len={}", 
+                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+        }
+        
+        println!("Direct fingerprint result: '{}'", fingerprint_rust.as_str());
+        
+        // C produces "sos" (3 chars), Rust produces "1sos" (4 chars)
+        // The issue is that we have 4 tokens instead of 3, but the pattern is there
+        // Let's check if this should be detected as SQLi using the blacklist
+        let is_sqli_fingerprint = state.check_is_sqli(&fingerprint_rust);
+        println!("Is fingerprint '{}' SQLi? {}", fingerprint_rust.as_str(), is_sqli_fingerprint);
+        
+        let is_sqli_rust = state.detect();
+        
+        println!("\nFuzz differential test crash-d1ff5132:");
+        println!("  Input bytes: {:?}", input);
+        println!("  Input string (lossy): {:?}", String::from_utf8_lossy(input));
+        println!("  Rust fingerprint: '{}'", fingerprint_rust.as_str());
+        println!("  Rust detection: {}", is_sqli_rust);
+        println!("  Expected (C) detection: true");
+        println!("  Token count after processing: {}", state.tokens.len());
+        
+        for (i, token) in state.tokens.iter().enumerate() {
+            println!("  Final Token {}: type={:?}, val='{}', pos={}, len={}", 
+                     i, token.token_type, token.value_as_str(), token.pos, token.len);
+        }
+        
+        // The C implementation returns true for this input
+        // Rust should match this behavior exactly
+        assert_eq!(is_sqli_rust, true, 
+                   "Rust should match C behavior - expected true but got {}. \
+                    This test should fail initially until the differential is fixed.", 
+                   is_sqli_rust);
+    }
+    
 }

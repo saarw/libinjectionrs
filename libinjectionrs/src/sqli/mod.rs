@@ -935,9 +935,9 @@ impl<'a> SqliState<'a> {
         }
         
         // Copy final tokens to the tokens vector for fingerprinting
-        // Use pos instead of left to include all tokens that were collected
+        // Use left instead of pos to match C implementation exactly
         self.tokens.clear();
-        for i in 0..pos.min(LIBINJECTION_SQLI_MAX_TOKENS) {
+        for i in 0..left.min(LIBINJECTION_SQLI_MAX_TOKENS) {
             if self.token_vec[i].token_type != TokenType::None {
                 self.tokens.push(self.token_vec[i].clone());
             }
@@ -950,11 +950,12 @@ impl<'a> SqliState<'a> {
         self.stats_comment_hash = tokenizer.stats_comment_hash;
         
         // Add last comment back to token array if there's space (matches C lines 1873-1877)
-        if self.tokens.len() < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
+        if left < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.token_type == TokenType::Comment {
             self.tokens.push(last_comment);
+            left += 1; // C line 1876: left += 1;
         }
         
-        self.tokens.len()
+        left
     }
     
     fn is_unary_op(&self, token: &Token) -> bool {
@@ -1003,42 +1004,6 @@ impl<'a> SqliState<'a> {
         }
         
         if n == 0 { 0 } else { 0 }
-    }
-    
-    fn check_special_5_token_patterns(&self) -> bool {
-        if self.tokens.len() < 5 {
-            return false;
-        }
-        
-        let t = &self.tokens;
-        
-        // Pattern: number operator ( number )
-        (t[0].token_type == TokenType::Number &&
-         (t[1].token_type == TokenType::Operator || t[1].token_type == TokenType::Comma) &&
-         t[2].token_type == TokenType::LeftParenthesis &&
-         t[3].token_type == TokenType::Number &&
-         t[4].token_type == TokenType::RightParenthesis) ||
-        
-        // Pattern: bareword operator ( bareword|number )
-        (t[0].token_type == TokenType::Bareword &&
-         t[1].token_type == TokenType::Operator &&
-         t[2].token_type == TokenType::LeftParenthesis &&
-         (t[3].token_type == TokenType::Bareword || t[3].token_type == TokenType::Number) &&
-         t[4].token_type == TokenType::RightParenthesis) ||
-        
-        // Pattern: number ) , ( number
-        (t[0].token_type == TokenType::Number &&
-         t[1].token_type == TokenType::RightParenthesis &&
-         t[2].token_type == TokenType::Comma &&
-         t[3].token_type == TokenType::LeftParenthesis &&
-         t[4].token_type == TokenType::Number) ||
-        
-        // Pattern: bareword ) operator ( bareword
-        (t[0].token_type == TokenType::Bareword &&
-         t[1].token_type == TokenType::RightParenthesis &&
-         t[2].token_type == TokenType::Operator &&
-         t[3].token_type == TokenType::LeftParenthesis &&
-         t[4].token_type == TokenType::Bareword)
     }
     
     /// Checks if a token contains MySQL conditional comment patterns (/*!)
@@ -1163,7 +1128,7 @@ impl<'a> SqliState<'a> {
         }
     }
     
-    fn check_is_sqli(&self, fingerprint: &Fingerprint) -> bool {
+    pub(crate) fn check_is_sqli(&self, fingerprint: &Fingerprint) -> bool {
         let is_bl = blacklist::is_blacklisted(fingerprint.as_str());
         if is_bl {
             let result = self.is_not_whitelist();
