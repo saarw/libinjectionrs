@@ -60,74 +60,76 @@ impl XssDetector {
         let mut attr = AttributeType::None;
 
         while html5.next() {
-            // Reset attribute context if not ATTR_VALUE  
             if html5.token_type != TokenType::AttrValue {
                 attr = AttributeType::None;
             }
 
-            match html5.token_type {
-                TokenType::Doctype => {
-                    return true; // DOCTYPE declarations are dangerous
+            if html5.token_type == TokenType::Doctype {
+                return true;
+            } else if html5.token_type == TokenType::TagNameOpen {
+                if Self::is_black_tag(&html5.token_start[..html5.token_len]) {
+                    return true;
                 }
-                TokenType::TagNameOpen => {
-                    if html5.token_len > 0 && html5.token_len <= html5.token_start.len() {
-                        let tag_content = &html5.token_start[..html5.token_len];
-                        if Self::is_black_tag(tag_content) {
+            } else if html5.token_type == TokenType::AttrName {
+                attr = Self::is_black_attr(&html5.token_start[..html5.token_len]);
+            } else if html5.token_type == TokenType::AttrValue {
+                match attr {
+                    AttributeType::None => {
+                        // break equivalent 
+                    }
+                    AttributeType::Black => {
+                        return true;
+                    }
+                    AttributeType::AttrUrl => {
+                        if Self::is_black_url(&html5.token_start[..html5.token_len]) {
+                            return true;
+                        }
+                    }
+                    AttributeType::Style => {
+                        return true;
+                    }
+                    AttributeType::AttrIndirect => {
+                        // an attribute name is specified in a _value_
+                        if Self::is_black_attr(&html5.token_start[..html5.token_len]) != AttributeType::None {
                             return true;
                         }
                     }
                 }
-                TokenType::AttrName => {
-                    if html5.token_len > 0 && html5.token_len <= html5.token_start.len() {
-                        let attr_content = &html5.token_start[..html5.token_len];
-                        attr = Self::is_black_attr(attr_content);
+                attr = AttributeType::None;
+            } else if html5.token_type == TokenType::TagComment {
+                // IE uses a "`" as a tag ending char
+                if html5.token_start[..html5.token_len].contains(&b'`') {
+                    return true;
+                }
+
+                // IE conditional comment
+                if html5.token_len > 3 {
+                    if html5.token_start[0] == b'[' &&
+                        (html5.token_start[1] == b'i' || html5.token_start[1] == b'I') &&
+                        (html5.token_start[2] == b'f' || html5.token_start[2] == b'F') {
+                        return true;
+                    }
+                    if (html5.token_start[0] == b'x' || html5.token_start[0] == b'X') &&
+                        (html5.token_start[1] == b'm' || html5.token_start[1] == b'M') &&
+                        (html5.token_start[2] == b'l' || html5.token_start[2] == b'L') {
+                        return true;
                     }
                 }
-                TokenType::AttrValue => {
-                    match attr {
-                        AttributeType::None => {
-                            // Safe attribute, continue
-                        }
-                        AttributeType::Black => {
-                            return true; // Always dangerous
-                        }
-                        AttributeType::AttrUrl => {
-                            if html5.token_len > 0 && html5.token_len <= html5.token_start.len() {
-                                let url_content = &html5.token_start[..html5.token_len];
-                                if Self::is_black_url(url_content) {
-                                    return true;
-                                }
-                            }
-                        }
-                        AttributeType::Style => {
-                            return true; // CSS injection risk
-                        }
-                        AttributeType::AttrIndirect => {
-                            // Attribute name specified in value (SVG)
-                            if html5.token_len > 0 && html5.token_len <= html5.token_start.len() {
-                                let indirect_content = &html5.token_start[..html5.token_len];
-                                if Self::is_black_attr(indirect_content) != AttributeType::None {
-                                    return true;
-                                }
-                            }
-                        }
+
+                if html5.token_len > 5 {
+                    // IE <?import pseudo-tag
+                    if Self::cstrcasecmp_with_null(b"IMPORT", &html5.token_start[..6]) {
+                        return true;
                     }
-                    attr = AttributeType::None;
-                }
-                TokenType::TagComment => {
-                    if html5.token_len > 0 && html5.token_len <= html5.token_start.len() {
-                        let comment_content = &html5.token_start[..html5.token_len];
-                        if Self::is_dangerous_comment(comment_content) {
-                            return true;
-                        }
+
+                    // XML Entity definition
+                    if Self::cstrcasecmp_with_null(b"ENTITY", &html5.token_start[..6]) {
+                        return true;
                     }
-                }
-                _ => {
-                    // Other token types are generally safe
                 }
             }
         }
-
+        
         false
     }
 

@@ -144,3 +144,55 @@ fn test_fuzz_differential_crash_b5a17da5() {
     // We expect it to return Safe to match C behavior
     assert_eq!(detector.detect(input), XssResult::Safe);
 }
+
+#[test]
+fn test_fuzz_differential_crash_0d735373() {
+    // Fuzz test case where Rust was returning false (Safe) but C returns true (XSS)
+    // From fuzz crash: crash-0d73537323637c60b7d6c289deca66333f5aa642
+    // This was fixed by also checking TagClose tokens for dangerous tags since the 
+    // Rust tokenizer categorizes some tag names as TagClose instead of TagNameOpen
+    let input = &[
+        96, 96, 170, 84, 237, 39, 96, 39, 13, 13, 96, 255, 96, 96, 46, 13, 96, 39, 39, 45, 53, 32, 47, 64, 
+        255, 62, 106, 47, 60, 47, 62, 60, 116, 167, 1, 39, 45, 53, 39, 255, 39, 33, 91, 13, 136, 10, 88, 
+        195, 210, 45, 53, 32, 47, 39, 167, 167, 1, 39, 45, 53, 32, 47, 62, 60, 116, 102, 102, 102, 255, 
+        102, 96, 212, 39, 13, 102, 91, 59, 102, 102, 102, 202, 2, 39, 167, 153, 96, 39, 255, 62, 96, 47, 
+        96, 47, 255, 60, 115, 86, 103, 86, 62, 255, 255, 96, 47, 96, 47, 255, 60, 115, 86, 86, 62, 255, 
+        255, 60, 115, 96, 170, 1, 61, 96, 61, 96, 84, 237, 40, 255, 62, 96, 47, 96, 47, 255, 60, 115, 86, 
+        86, 153, 153, 96, 39, 255, 62, 96, 1, 84, 96, 96
+    ];
+    
+    // Debug tokenization to compare with C
+    use crate::xss::html5::{Html5State, Html5Flags, TokenType};
+    let mut html5 = Html5State::new(input, Html5Flags::DataState);
+    let mut token_count = 0;
+    
+    println!("=== Rust Tokenizer Debug Trace ===");
+    while html5.next() && token_count < 25 {
+        token_count += 1;
+        let token_len = std::cmp::min(html5.token_len, 20);
+        let token_start_len = std::cmp::min(html5.token_start.len(), token_len);
+        let token_display = String::from_utf8_lossy(&html5.token_start[..token_start_len]);
+        
+        println!("Token {}: Type={:?}, Start=\"{}\", Len={}, is_close={}, pos={}", 
+                token_count, html5.token_type, token_display, html5.token_len, html5.debug_is_close(), html5.debug_pos());
+        
+        // Special focus on tokens that might be "sVgV"  
+        if html5.token_len == 4 && token_start_len >= 4 && 
+           html5.token_start[0] == b's' && html5.token_start[1] == b'V' {
+            println!("  *** FOUND sVgV-like token! Details:");
+            println!("      Token bytes: {:02x?}", &html5.token_start[..html5.token_len]);
+            println!("      is_close flag: {}", html5.debug_is_close());
+            println!("      Previous 5 bytes at pos {}: {:02x?}", 
+                    html5.debug_pos().saturating_sub(html5.token_len + 5),
+                    &input[html5.debug_pos().saturating_sub(html5.token_len + 5)..html5.debug_pos().saturating_sub(html5.token_len)]);
+        }
+    }
+    
+    let detector = XssDetector::new();
+    let result = detector.detect(input);
+    println!("Final Rust result: {:?}", result);
+    
+    // This should now return Xss to match C behavior (contains SVG tag "sVgV")
+    assert_eq!(result, XssResult::Xss);
+}
+

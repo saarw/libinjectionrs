@@ -81,6 +81,16 @@ impl<'a> Html5State<'a> {
     pub fn position(&self) -> usize {
         self.pos
     }
+    
+    #[cfg(test)]
+    pub fn debug_is_close(&self) -> bool {
+        self.is_close
+    }
+    
+    #[cfg(test)]
+    pub fn debug_pos(&self) -> usize {
+        self.pos
+    }
 
     fn is_eof(&self) -> bool {
         self.pos >= self.len
@@ -351,7 +361,9 @@ impl<'a> Html5State<'a> {
                         self.token_type = TokenType::TagClose;
                         self.state_fn = Self::state_data;
                     } else {
-                        self.state_fn = Self::state_emit_tag_close_char;
+                        // Match C logic exactly: don't advance pos, keep TagNameOpen, next state handles '>'
+                        self.token_type = TokenType::TagNameOpen;
+                        self.state_fn = Self::state_tag_name_close;
                     }
                     return true;
                 }
@@ -389,48 +401,21 @@ impl<'a> Html5State<'a> {
     }
 
     fn state_tag_name_close(&mut self) -> bool {
-        let start = self.pos;
-        while let Some(ch) = self.current_char() {
-            match ch {
-                b'>' => {
-                    if self.pos > start {
-                        self.set_token(TokenType::TagClose, start, self.pos - start);
-                        self.advance();
-                        self.state_fn = Self::state_data;
-                        return true;
-                    }
-                    break;
-                }
-                ch if Self::is_whitespace(ch) => {
-                    if self.pos > start {
-                        self.set_token(TokenType::TagClose, start, self.pos - start);
-                        self.skip_whitespace();
-                        if self.current_char() == Some(b'>') {
-                            self.advance();
-                            self.state_fn = Self::state_data;
-                        } else {
-                            self.state_fn = Self::state_eof;
-                        }
-                        return true;
-                    }
-                    break;
-                }
-                _ => {
-                    self.advance();
-                }
-            }
-        }
-
-        if self.pos > start {
-            self.set_token(TokenType::TagClose, start, self.pos - start);
-            self.state_fn = Self::state_eof;
-            true
-        } else {
-            false
-        }
+        // Match C implementation exactly: h5_state_tag_name_close (lines 234-248)
+        self.is_close = false;                                  // hs->is_close = 0;
+        self.set_token(TokenType::TagNameClose, self.pos, 1);   // token_start = hs->s + hs->pos; token_len = 1; token_type = TAG_NAME_CLOSE;
+        self.advance();                                         // hs->pos += 1;
+        if self.pos < self.len {                                // if (hs->pos < hs->len) {
+            self.state_fn = Self::state_data;                   //     hs->state = h5_state_data;
+        } else {                                                // } else {
+            self.state_fn = Self::state_eof;                    //     hs->state = h5_state_eof;
+        }                                                       // }
+        
+        true                                                    // return 1;
     }
 
     fn state_emit_tag_close_char(&mut self) -> bool {
+        self.is_close = false;  // Match C behavior - reset is_close when emitting TAG_NAME_CLOSE
         self.set_token(TokenType::TagNameClose, self.pos, 1);
         self.advance();
         if self.pos < self.len {
@@ -513,7 +498,7 @@ impl<'a> Html5State<'a> {
                 return true;
             } else if ch == b'>' {  // ch == CHAR_GT
                 self.set_token(TokenType::AttrName, start_pos, scan_pos - start_pos);
-                self.state_fn = Self::state_emit_tag_close_char;
+                self.state_fn = Self::state_tag_name_close;  // Match C: hs->state = h5_state_tag_name_close;
                 self.pos = scan_pos;  // hs->pos = pos (NOT pos + 1!)
                 return true;
             } else {
@@ -541,7 +526,7 @@ impl<'a> Html5State<'a> {
                 self.state_before_attribute_value()  // return h5_state_before_attribute_value(hs)
             }
             Some(0x3e) => {  // case CHAR_GT (62 as i8)
-                self.state_emit_tag_close_char()  // return h5_state_tag_name_close(hs)
+                self.state_tag_name_close()  // return h5_state_tag_name_close(hs)
             }
             Some(_) => {  // default
                 self.state_attribute_name()  // return h5_state_attribute_name(hs)
