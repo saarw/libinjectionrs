@@ -28,13 +28,5 @@ smallvec = ["dep:smallvec"]
 name = "libinjectionrs"
 path = "src/lib.rs"
 
-[[bin]]
-name = "debug_differential"
-path = "src/main.rs"
-
-[[bin]]
-name = "debug_tokenization_detailed"
-path = "../debug_tokenization_detailed.rs"
-
 [lints]
 workspace = true
