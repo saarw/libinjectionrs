@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Rust port of libinjection - SQL/XSS injection detection library"
 keywords = ["security", "sql-injection", "xss", "detection", "web-security"]
 categories = ["web-programming", "parser-implementations"]
-# Include generated data file in published package
-include = ["src/**/*", "build.rs", "Cargo.toml"]
+# Include generated data file and workspace README in published package
+include = ["src/**/*", "build.rs", "Cargo.toml", "README.md"]
 
 [dependencies]
 bitflags = { workspace = true }

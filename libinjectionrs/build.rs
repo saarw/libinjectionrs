@@ -30,6 +30,14 @@ fn main() -> io::Result<()> {
         println!("cargo:rustc-cfg=build_generated");
     }
     
+    // Copy workspace README if it doesn't exist locally (for package builds)
+    let workspace_readme = "../README.md";
+    let local_readme = "README.md";
+    
+    if Path::new(workspace_readme).exists() && !Path::new(local_readme).exists() {
+        std::fs::copy(workspace_readme, local_readme)?;
+    }
+    
     Ok(())
 }
 
