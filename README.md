@@ -1,6 +1,6 @@
 # libinjectionrs
 
-A vibe ported (AI translation without manually reviewing much of the code) of the libinjection library from C to memory-safe Rust. Libinjection is a library for SQL injection and XSS attack detection in strings. The port was done with an original plan created with GPT-5 and then mostly executed with Claude Code. 
+A vibe port (AI translation without manually reviewing much of the code) of the libinjection library from C to memory-safe Rust. Libinjection is a library for SQL injection and XSS attack detection in strings. The port was done with an original plan created with GPT-5 and then mostly executed with Claude Code. 
 
 ## Features
 - SQL injection detection with fingerprinting
