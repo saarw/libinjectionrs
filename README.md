@@ -1,17 +1,41 @@
 # libinjectionrs
 
-A vibe-ported (AI-assisted translation) of the libinjection library for SQL injection and XSS detection from C to memory-safe Rust.
+A vibe ported (AI-assisted translation) of the libinjection library for SQL injection and XSS attack detection from C to memory-safe Rust. The port was done with an original plan created with GPT-5 and then mostly executed with Claude Code.
 
 ## Features
-
 - SQL injection detection with fingerprinting
 - XSS detection with context awareness
-- Zero-copy parsing
-- `no_std` support with optional `alloc`
 - Minimal heap allocations using `SmallVec`
 
+## Quality controls
+- All the test files for the C library are run by the Rust library and pass.
+- Differential fuzz testing has been run without revealing differences for over an hour for both SQL injectin and XSS inputs.
+- Linting has been configured both to deny unsafe code and many conditions that could result in panics in the library (tests and debug tools still allow panics).
+
+## Project Structure
+```
+libinjectionrs/
+├── benches/                    # Performance benchmarks
+├── comparison-bin/             # Tools for comparing Rust vs C behavior
+├── docs/                       # Architecture and porting documentation
+├── ffi-harness/               # C FFI testing harness
+├── fuzz/                      # Fuzzing targets and corpora
+├── libinjection-c/            # Git submodule with original C library
+├── libinjection-debug/        # Debug tools for comparing implementations
+├── libinjectionrs/            # Main Rust library source code
+└── scripts/                   # Build and corpus generation scripts
+```
+
 ## Linting
-Clippy has been configured to deny unsafe code and many conditions that may result in panics (but still allows indexing into a slice to match the C code). Run clippy with warnings ignored ```cargo clippy --workspace --all-targets -- -A warnings```
+```cargo clippy --workspace --all-targets -- -A warnings```
+
+## Development
+
+To get started with development, first fetch the git submodule containing the original C library:
+
+```bash
+git submodule update --init --recursive
+```
 
 ## Usage
 
