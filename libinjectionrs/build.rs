@@ -16,26 +16,18 @@ fn main() -> io::Result<()> {
     
     let submodule_data = "../libinjection-c/src/sqlparse_data.json";
     
+    let out_dir = env::var("OUT_DIR").unwrap();
+    
     if Path::new(submodule_data).exists() {
         // Tell cargo to rerun if the data files change
         println!("cargo:rerun-if-changed={}", submodule_data);
         println!("cargo:rerun-if-changed=../libinjection-c/src/fingerprints.txt");
-        
-        let out_dir = env::var("OUT_DIR").unwrap();
         
         // Process sqlparse_data.json (includes fingerprints)
         process_sqlparse_data(&out_dir)?;
         
         // Set cfg flag to indicate we generated data
         println!("cargo:rustc-cfg=build_generated");
-    }
-    
-    // Copy workspace README if it doesn't exist locally (for package builds)
-    let workspace_readme = "../README.md";
-    let local_readme = "README.md";
-    
-    if Path::new(workspace_readme).exists() && !Path::new(local_readme).exists() {
-        std::fs::copy(workspace_readme, local_readme)?;
     }
     
     Ok(())
@@ -222,3 +214,4 @@ fn process_sqlparse_data(out_dir: &str) -> io::Result<()> {
     
     Ok(())
 }
+

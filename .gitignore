@@ -89,5 +89,5 @@ gmon.out
 
 # Note: libinjection-c/ is a git submodule and has its own .gitignore files
 
-# Auto-generated README in package directory (copied by build.rs)
+# Symlinked README in package directory (for crates.io publishing)
 /libinjectionrs/README.md
