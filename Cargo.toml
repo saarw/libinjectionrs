@@ -5,9 +5,9 @@ members = ["libinjectionrs", "comparison-bin", "benches"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["William Saar <william@saar.se>"]
 license = "BSD-3-Clause"
-repository = "https://github.com/yourusername/libinjectionrs"
+repository = "https://github.com/saarw/libinjectionrs"
 
 [workspace.dependencies]
 bitflags = "2.6"

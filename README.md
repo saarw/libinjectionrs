@@ -13,7 +13,7 @@ A vibe ported (AI-assisted translation) of the libinjection library for SQL inje
 - Linting has been configured both to deny unsafe code and many conditions that could result in panics in the library (tests and debug tools still allow panics).
 
 ## Project Structure
-```
+```ignore
 libinjectionrs/
 ├── benches/                    # Performance benchmarks
 ├── comparison-bin/             # Tools for comparing Rust vs C behavior
