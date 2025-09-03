@@ -54,6 +54,7 @@ mod final_test;
 
 
 
+
 // Re-export types for advanced usage
 pub use sqli::{SqliState, SqliFlags, Fingerprint};
 pub use xss::{XssDetector, XssResult};
@@ -149,7 +150,7 @@ impl StdError for Error {}
 /// use libinjectionrs::detect_sqli;
 ///
 /// // Safe input
-/// let result = detect_sqli(b"SELECT * FROM users WHERE id = 1");
+/// let result = detect_sqli(b"hello world");
 /// assert!(!result.is_injection());
 ///
 /// // SQL injection

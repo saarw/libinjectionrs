@@ -1,4 +1,4 @@
-use core::ops::Deref;
+use core::ops::{Deref, BitOr, BitOrAssign};
 
 #[cfg(feature = "smallvec")]
 use smallvec::SmallVec;
@@ -38,6 +38,20 @@ impl SqliFlags {
         } else {
             b'\0'
         }
+    }
+}
+
+impl BitOr for SqliFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        SqliFlags(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for SqliFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
     }
 }
 
