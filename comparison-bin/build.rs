@@ -8,12 +8,10 @@ use std::path::PathBuf;
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let lib_dir = PathBuf::from(&manifest_dir).parent().unwrap().join("ffi-harness").join("lib");
+    let static_lib = lib_dir.join("libinjection_harness.a");
     
-    // Tell cargo to look for libraries in the specified directory
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
-    
-    // Tell cargo to tell rustc to link the static library.
-    println!("cargo:rustc-link-lib=static=injection_harness");
+    // Link the static library directly by path
+    println!("cargo:rustc-link-arg={}", static_lib.display());
     
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=../ffi-harness/harness.h");
