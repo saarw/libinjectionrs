@@ -181,9 +181,9 @@ impl XssDetector {
                 }
             }
 
-            // Check XMLNS and XLINK
-            if Self::cstrcasecmp_with_null(b"XMLNS", attr_name) 
-                || Self::cstrcasecmp_with_null(b"XLINK", attr_name) {
+            // Check XMLNS and XLINK - use prefix matching like C (checks first 5 chars only)
+            if Self::cstrcasecmp_with_null_limited(b"XMLNS", attr_name, 5) 
+                || Self::cstrcasecmp_with_null_limited(b"XLINK", attr_name, 5) {
                 return AttributeType::Black;
             }
         }
@@ -269,6 +269,46 @@ impl XssDetector {
         }
 
         false
+    }
+
+    // Case-insensitive string comparison that ignores null bytes - prefix version
+    // Replicates C's cstrcasecmp_with_null(pattern, input, n) where n limits input length
+    fn cstrcasecmp_with_null_limited(pattern: &[u8], input: &[u8], n: usize) -> bool {
+        let mut pattern_idx = 0;
+        let mut input_idx = 0;
+        let mut remaining = n;
+        
+        while remaining > 0 && input_idx < input.len() {
+            let input_char = input[input_idx];
+            input_idx += 1;
+            remaining -= 1;
+            
+            // Skip null bytes in input (like C's cb == '\0')
+            if input_char == 0 {
+                continue;
+            }
+            
+            // Always advance pattern pointer (like C's ca = a[ai++])
+            if pattern_idx >= pattern.len() {
+                return false; // Pattern exhausted but input continues within n chars
+            }
+            let pattern_char = pattern[pattern_idx];
+            pattern_idx += 1;
+            
+            // Convert input character to uppercase (like C)
+            let mut cb = input_char;
+            if cb >= b'a' && cb <= b'z' {
+                cb -= 0x20;
+            }
+            
+            // Compare characters (like C's ca != cb)
+            if pattern_char != cb {
+                return false;
+            }
+        }
+        
+        // Check if pattern is fully consumed (like C's final ca = a[ai++]; ca == '\0')
+        pattern_idx >= pattern.len()
     }
 
     // Case-insensitive string comparison that ignores null bytes

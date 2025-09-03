@@ -196,3 +196,19 @@ fn test_fuzz_differential_crash_0d735373() {
     assert_eq!(result, XssResult::Xss);
 }
 
+#[test]
+fn test_fuzz_differential_001c6f03() {
+    // Fuzz test case where Rust returns false (Safe) but C returns true (XSS)
+    // From crash: crash-001c6f0337be3d0405db55c0b2d3b0f27fdc2adb
+    // Input: "æ="¡"="	`¡=""		'g=''='`='gN=='='`='xMLNS;= ='`='güû	("
+    let input = &[
+        230, 61, 34, 145, 34, 61, 34, 9, 96, 145, 61, 34, 34, 9, 9, 39, 103, 2, 61, 39, 3, 61, 39, 96, 
+        2, 61, 39, 103, 1, 78, 2, 61, 61, 39, 3, 61, 39, 96, 2, 61, 39, 120, 77, 76, 78, 83, 2, 59, 
+        61, 32, 61, 39, 96, 2, 61, 39, 103, 1, 251, 9, 40
+    ];
+    let detector = XssDetector::new();
+    // This test currently fails - Rust returns Safe but C returns Xss
+    // We expect it to return Xss to match C behavior
+    assert_eq!(detector.detect(input), XssResult::Xss);
+}
+
