@@ -665,7 +665,7 @@ impl<'a> Html5State<'a> {
             if slice.eq_ignore_ascii_case(b"DOCTYPE") {
                 self.state_fn = Self::state_doctype;
                 return self.next();
-            } else if slice.eq_ignore_ascii_case(b"[CDATA[") {
+            } else if slice == b"[CDATA[" {
                 self.pos += 7;
                 self.state_fn = Self::state_cdata;
                 self.next()

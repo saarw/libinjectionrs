@@ -212,3 +212,17 @@ fn test_fuzz_differential_001c6f03() {
     assert_eq!(detector.detect(input), XssResult::Xss);
 }
 
+#[test]
+fn test_fuzz_differential_070fdf5c() {
+    // Fuzz test case where Rust returns false (Safe) but C returns true (XSS)
+    // From crash: crash-070fdf5c37b311aaa3457df356ddd6328056682c
+    // Input: "�'/)p\u{b}\"\n/\u{c}To=\nnnn`\u{c}To=n`/\u{c}To=nnnn\u{c}nn`\u{c}To=To`/\u{c}To=d/\u{c}To=nnnnn`\u{c}To=Toon\nn`\u{c}To=`\u{4}\n\n*>\n\n'�\u{4}>n`\u{c}To=`\u{4}\n\n>\nn`�`<![cDATA[<![c/\u{c}To=nnn\u{c}nn`\u{c}To=T/\u{c}To=dn[\u{c}To=Toon\nDaTn`\u{c}To=dn`\u{c}To=!`\u{c}To=`\u{4}\n\u{8}>\nn`/\u{c}To=!nn\u{c}"
+    let input = &[
+        243, 39, 47, 41, 112, 11, 34, 10, 47, 12, 84, 111, 61, 10, 110, 110, 110, 96, 12, 84, 111, 61, 110, 96, 47, 12, 84, 111, 61, 110, 110, 110, 110, 12, 110, 110, 96, 12, 84, 111, 61, 84, 111, 96, 47, 12, 84, 111, 61, 100, 47, 12, 84, 111, 61, 110, 110, 110, 110, 110, 96, 12, 84, 111, 61, 84, 111, 111, 110, 10, 110, 96, 12, 84, 111, 61, 96, 4, 10, 10, 42, 62, 10, 10, 39, 189, 4, 62, 110, 96, 12, 84, 111, 61, 96, 4, 10, 10, 62, 10, 110, 96, 216, 96, 60, 33, 91, 99, 68, 65, 84, 65, 91, 60, 33, 91, 99, 47, 12, 84, 111, 61, 110, 110, 110, 12, 110, 110, 96, 12, 84, 111, 61, 84, 47, 12, 84, 111, 61, 100, 110, 91, 12, 84, 111, 61, 84, 111, 111, 110, 10, 68, 97, 84, 110, 96, 12, 84, 111, 61, 100, 110, 96, 12, 84, 111, 61, 33, 96, 12, 84, 111, 61, 96, 4, 10, 8, 62, 10, 110, 96, 47, 12, 84, 111, 61, 33, 110, 110, 12
+    ];
+    let detector = XssDetector::new();
+    // This test currently fails - Rust returns Safe but C returns Xss
+    // We expect it to return Xss to match C behavior
+    assert_eq!(detector.detect(input), XssResult::Xss);
+}
+
