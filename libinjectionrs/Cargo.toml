@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Rust port of libinjection - SQL/XSS injection detection library"
+readme = "README.md"
 keywords = ["security", "sql-injection", "xss", "detection", "web-security"]
 categories = ["web-programming", "parser-implementations"]
 # Include generated data file and workspace README in published package  
