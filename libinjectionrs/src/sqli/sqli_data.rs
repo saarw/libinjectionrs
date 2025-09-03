@@ -1,7 +1,12 @@
 // This module includes the auto-generated SQL data from build.rs
 
 // Include the generated data at compile time
+#[cfg(build_generated)]
 include!(concat!(env!("OUT_DIR"), "/sqli_data.rs"));
+
+// Fallback to committed data when submodule is not available (e.g., on crates.io)
+#[cfg(not(build_generated))]
+include!("generated_data.rs");
 
 // Additional helper functions can be added here
 impl CharType {

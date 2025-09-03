@@ -11,14 +11,24 @@ use std::io::{self, Write};
 use std::path::Path;
 
 fn main() -> io::Result<()> {
-    // Tell cargo to rerun if the data files change
-    println!("cargo:rerun-if-changed=../libinjection-c/src/sqlparse_data.json");
-    println!("cargo:rerun-if-changed=../libinjection-c/src/fingerprints.txt");
+    // Tell rustc about our custom cfg
+    println!("cargo:rustc-check-cfg=cfg(build_generated)");
     
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let submodule_data = "../libinjection-c/src/sqlparse_data.json";
     
-    // Process sqlparse_data.json (includes fingerprints)
-    process_sqlparse_data(&out_dir)?;
+    if Path::new(submodule_data).exists() {
+        // Tell cargo to rerun if the data files change
+        println!("cargo:rerun-if-changed={}", submodule_data);
+        println!("cargo:rerun-if-changed=../libinjection-c/src/fingerprints.txt");
+        
+        let out_dir = env::var("OUT_DIR").unwrap();
+        
+        // Process sqlparse_data.json (includes fingerprints)
+        process_sqlparse_data(&out_dir)?;
+        
+        // Set cfg flag to indicate we generated data
+        println!("cargo:rustc-cfg=build_generated");
+    }
     
     Ok(())
 }
