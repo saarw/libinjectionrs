@@ -145,18 +145,20 @@ impl XssDetector {
             }
         }
 
-        // Check SVG tags (case insensitive)
+        // Check SVG tags (case insensitive) - match C's manual case checking exactly
         if tag_name.len() >= 3 {
-            let first_three = &tag_name[..3];
-            if first_three.eq_ignore_ascii_case(b"svg") {
+            if (tag_name[0] == b's' || tag_name[0] == b'S') &&
+               (tag_name[1] == b'v' || tag_name[1] == b'V') &&
+               (tag_name[2] == b'g' || tag_name[2] == b'G') {
                 return true;
             }
         }
 
-        // Check XSL tags (case insensitive)
+        // Check XSL tags (case insensitive) - match C's manual case checking exactly
         if tag_name.len() >= 3 {
-            let first_three = &tag_name[..3];
-            if first_three.eq_ignore_ascii_case(b"xsl") {
+            if (tag_name[0] == b'x' || tag_name[0] == b'X') &&
+               (tag_name[1] == b's' || tag_name[1] == b'S') &&
+               (tag_name[2] == b'l' || tag_name[2] == b'L') {
                 return true;
             }
         }
@@ -169,10 +171,10 @@ impl XssDetector {
             return AttributeType::None;
         }
 
-        // Check for event handlers (on* attributes)
+        // Check for event handlers (on* attributes) - match C's manual case checking exactly
         if attr_name.len() >= 5 {
-            let first_two = &attr_name[..2];
-            if first_two.eq_ignore_ascii_case(b"on") {
+            if (attr_name[0] == b'o' || attr_name[0] == b'O') &&
+               (attr_name[1] == b'n' || attr_name[1] == b'N') {
                 let event_name = &attr_name[2..];
                 for event in BLACK_ATTR_EVENTS {
                     if Self::cstrcasecmp_with_null(event.name.as_bytes(), event_name) {
