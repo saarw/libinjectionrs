@@ -1,6 +1,6 @@
 # libinjectionrs
 
-A vibe ported (AI-assisted translation) of the libinjection library for SQL injection and XSS attack detection from C to memory-safe Rust. The port was done with an original plan created with GPT-5 and then mostly executed with Claude Code.
+A vibe ported (AI translation without manually reviewing much of the code) of the libinjection library from C to memory-safe Rust. Libinjection is a library for SQL injection and XSS attack detection in strings. The port was done with an original plan created with GPT-5 and then mostly executed with Claude Code. 
 
 ## Features
 - SQL injection detection with fingerprinting
@@ -8,12 +8,13 @@ A vibe ported (AI-assisted translation) of the libinjection library for SQL inje
 - Minimal heap allocations using `SmallVec`
 
 ## Quality controls
+- While the AI did all of the coding work, its process was supervised by a human and most of its outputs required additional correction prompts.
 - All the test files for the C library are run by the Rust library and pass.
-- Differential fuzz testing has been run without revealing differences for over an hour for both SQL injectin and XSS inputs.
-- Linting has been configured both to deny unsafe code and many conditions that could result in panics in the library (tests and debug tools still allow panics).
+- Differential fuzz testing has been run without revealing differences between C and Rust for over an hour for both SQL injection and XSS inputs.
+- Linting has been configured both to deny unsafe code and many conditions that could result in panics in the library, excluding slice indexing which could theoretically still panic (tests and debug tools still allow panics).
 
 ## Project Structure
-```ignore
+```text
 libinjectionrs/
 ├── benches/                    # Performance benchmarks
 ├── comparison-bin/             # Tools for comparing Rust vs C behavior
@@ -76,6 +77,6 @@ Scripts create fuzz corpuses:
 
 ## License
 
-Licensed under the BSD 3-Clause License ([LICENSE](LICENSE) or https://opensource.org/licenses/BSD-3-Clause).
+Licensed under the BSD 3-Clause License ([LICENSE](LICENSE) or <https://opensource.org/licenses/BSD-3-Clause>).
 
 This project is a Rust port of [libinjection](https://github.com/client9/libinjection), which is also licensed under the BSD 3-Clause License.
