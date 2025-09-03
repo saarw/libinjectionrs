@@ -114,6 +114,7 @@ impl<'a> Html5State<'a> {
         }
     }
 
+    #[allow(dead_code)] // Follows C implementation - may be used in future HTML5 parsing features
     fn peek(&self, offset: usize) -> Option<u8> {
         let pos = self.pos + offset;
         if pos < self.len {
@@ -129,6 +130,7 @@ impl<'a> Html5State<'a> {
         self.token_len = len;
     }
 
+    #[allow(dead_code)] // Follows C implementation - may be used in future HTML5 parsing features
     fn skip_whitespace(&mut self) -> Option<u8> {
         while let Some(ch) = self.current_char() {
             if Self::is_whitespace(ch) {

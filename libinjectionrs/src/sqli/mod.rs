@@ -355,6 +355,7 @@ impl<'a> SqliState<'a> {
         self.token_vec.resize(LIBINJECTION_SQLI_MAX_TOKENS + 3, Token::new());
         
         // pos is the position of where the NEXT token goes
+        #[allow(unused_assignments)] // Follows C implementation - pos initially 0, then set to 1 if real token found
         let mut pos = 0usize;
         // left is a count of how many tokens are already folded or processed
         let mut left = 0usize;

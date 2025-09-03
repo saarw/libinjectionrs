@@ -1,10 +1,12 @@
+#![allow(non_camel_case_types)] // Allow C naming conventions in generated bindings
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use libinjectionrs::{detect_sqli as rust_detect_sqli, detect_xss as rust_detect_xss};
 use serde::{Deserialize, Serialize};
 use std::ffi::CString;
 use std::fs;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 
 // Include the generated bindings

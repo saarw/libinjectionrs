@@ -232,6 +232,7 @@ impl XssDetector {
         false
     }
 
+    #[allow(dead_code)] // Follows C implementation - may be used in future XSS detection features
     fn is_dangerous_comment(comment: &[u8]) -> bool {
         // IE uses backtick as tag ending character
         if comment.contains(&b'`') {
